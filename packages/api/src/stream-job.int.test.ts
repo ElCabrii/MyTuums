@@ -1,4 +1,8 @@
 import {
+  conversation,
+  conversationParticipant,
+  message,
+  messageAttachment,
   notification,
   post,
   user,
@@ -177,4 +181,88 @@ it("rejects provider-ready media outside the duration policy", async () => {
   ).toBe("done");
   expect(await db.select().from(video)).toMatchObject([{ state: "failed" }]);
   expect(await db.select().from(post)).toHaveLength(0);
+});
+
+/**
+ * The message-video fork (issue #408): the message row already exists — it
+ * was sent while the video was processing — so the workflow's only jobs are
+ * the video's own state transitions, and there is deliberately no
+ * `video_failed` notice (participants see the failed attachment in the
+ * thread, not an inbox notification).
+ */
+async function pendingMessageVideo() {
+  const sender = await createTestUser();
+  const recipient = await createTestUser();
+  const [userAId, userBId] =
+    sender.id < recipient.id ? [sender.id, recipient.id] : [recipient.id, sender.id];
+  const conversationId = crypto.randomUUID();
+  const messageId = crypto.randomUUID();
+  const videoId = crypto.randomUUID();
+  await db.batch([
+    db.insert(conversation).values({ id: conversationId, userAId, userBId }),
+    db.insert(conversationParticipant).values([
+      { conversationId, userId: sender.id, status: "active" },
+      { conversationId, userId: recipient.id, status: "active" },
+    ]),
+    db.insert(message).values({ id: messageId, conversationId, senderId: sender.id, body: "" }),
+    db.insert(video).values({
+      id: videoId,
+      authorId: sender.id,
+      state: "queued",
+      byteSize: 10,
+      streamCreatorId: `mytuums-test:${videoId}`,
+      streamUid: videoId.replaceAll("-", ""),
+      expiresAt: new Date(Date.now() + 1_800_000),
+    }),
+    db.insert(messageAttachment).values({
+      messageId,
+      kind: "video",
+      mediaPath: `/media/videos/${videoId}/master.m3u8`,
+      contentType: "application/vnd.apple.mpegurl",
+      byteSize: 10,
+      videoId,
+    }),
+  ]);
+  return { videoId, conversationId, sender, recipient };
+}
+
+it("publishes a message video in place: playback lands, no post is created, no notice is sent", async () => {
+  const { videoId } = await pendingMessageVideo();
+  expect(
+    await advanceStreamVideo(
+      db,
+      { ...provider, status: () => Promise.resolve({ ...ready, ready: false }) },
+      videoId,
+    ),
+  ).toBe("waiting");
+  expect(await advanceStreamVideo(db, provider, videoId)).toBe("done");
+  // Duplicate delivery must not re-publish.
+  expect(await advanceStreamVideo(db, provider, videoId)).toBe("done");
+  expect(await db.select().from(post)).toHaveLength(0);
+  expect(await db.select().from(videoSubmission)).toHaveLength(0);
+  expect(await db.select().from(video)).toMatchObject([
+    { state: "published", playback: { width: 640, height: 360, captionLanguage: null } },
+  ]);
+  expect(await db.select().from(notification)).toHaveLength(0);
+});
+
+it("fails a message video without a video_failed notice — the thread is the surface", async () => {
+  const { videoId } = await pendingMessageVideo();
+  expect(
+    await advanceStreamVideo(
+      db,
+      { ...provider, status: () => Promise.reject(new StreamError("ownership")) },
+      videoId,
+    ),
+  ).toBe("done");
+  expect(await db.select().from(video)).toMatchObject([{ state: "failed" }]);
+  expect(await db.select().from(notification)).toHaveLength(0);
+});
+
+it("cannot publish a message video without its message attachment row", async () => {
+  const { videoId } = await pendingMessageVideo();
+  await db.delete(messageAttachment);
+  expect(await advanceStreamVideo(db, provider, videoId)).toBe("done");
+  // Removing its destination commits terminal state and cleanup immediately.
+  expect(await db.select().from(video)).toMatchObject([{ state: "deleted" }]);
 });

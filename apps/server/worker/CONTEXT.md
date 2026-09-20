@@ -269,3 +269,14 @@ release gate; no browser credentials cross that binding.
 local bindings, password auth and captured mail. It has no hosted configuration
 or Access bypass flag. `../src/development-platform.ts` owns resource persistence
 and jobs bindings; see [local development](../../../docs/operations.md#local-development).
+
+## Message media delivery
+
+The application media authorizer routes `messages/` keys through the message
+participant/report gate. `media.ts` serves allowlisted voice containers as well
+as raster images, with the same authorization before and after storage access
+and private/no-store responses. Voice objects do not derive image variants.
+Video manifests use the existing Stream resolver with message authorization
+as an alternative to post visibility. The application injects `videoJobs` into
+the API so a message send dispatches its committed video-processing intent.
+The native media test covers authorized voice delivery and signed-out refusal.

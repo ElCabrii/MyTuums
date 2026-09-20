@@ -43,7 +43,7 @@ function conversationRow(overrides: Partial<ConversationItem> = {}): Conversatio
     lastMessageAt: new Date(),
     lastReadAt: null,
     unreadCount: 0,
-    lastMessage: { senderId: OTHER, body: "hi", createdAt: new Date() },
+    lastMessage: { senderId: OTHER, body: "hi", mediaKind: null, createdAt: new Date() },
     user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
     ...overrides,
   };
@@ -68,7 +68,12 @@ it("each conversation row shows its own unread count, capped past ninety-nine", 
       conversationRow({
         conversationId: "c-2",
         unreadCount: 0,
-        lastMessage: { senderId: "viewer-1", body: "my own", createdAt: new Date() },
+        lastMessage: {
+          senderId: "viewer-1",
+          body: "my own",
+          mediaKind: null,
+          createdAt: new Date(),
+        },
       }),
       conversationRow({ conversationId: "c-3", unreadCount: 120 }),
     ],

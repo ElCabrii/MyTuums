@@ -403,3 +403,20 @@ the SPA before the application Worker that packages it.
 documents instead.
 The production origin is an explicit public build input and part of Turbo's
 build cache key. The branding build shares this plugin.
+
+## Message attachments
+
+`src/components/message-thread.tsx` owns the recipient-scoped composer: up to
+four images, one voice message, or one video, optionally with text. Image
+acceptance/re-encoding, the media picker and Stream upload atoms are shared
+with posts. A selected video blocks sending until upload completes.
+`src/lib/voice-recorder.ts` owns microphone capture, cancellation (including a
+late permission grant), the five-minute limit and track release. Preview
+components own and revoke their object URLs.
+
+`src/components/message-attachments.tsx` renders both thread attachments and
+report evidence. Processing videos poll while their thread is open; published
+videos use the existing player. `src/lib/message-preview.ts` supplies consistent
+media-only previews to the inbox and request list. The desktop messages pane
+uses the full viewport width. Verify with the message atom/thread DOM suites,
+voice-recorder tests, moderation case tests, and local browser inspection.

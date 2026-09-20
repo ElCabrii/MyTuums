@@ -11,7 +11,7 @@ import { afterAll, describe, expect, it } from "vitest";
  * #408): a database pinned at 0006 — the last world without private messages
  * and with reports restricted to posts and users — carries open and resolved
  * report rows, then the full committed set runs on top of it and must apply
- * only 0007. The report rebuild inside that migration is the risky part: it
+ * the remaining migrations. The report rebuild is the risky part: it
  * must carry every row across with its resolution metadata intact, and the
  * widened target-type check must accept 'message' while still refusing
  * garbage.
@@ -22,8 +22,8 @@ afterAll(async () => {
   await cleanup?.();
 });
 
-/** A copy of the committed migrations whose journal stops BEFORE 0007. */
-async function prePrivateMessagesFolder() {
+/** A copy of the committed migrations pinned before the upgrade under test. */
+async function migrationsBefore(count: number) {
   const folder = await mkdtemp(join(tmpdir(), "mytuums-migrations-0006-"));
   await cp(committedMigrationsFolder, folder, { recursive: true });
   const journalPath = join(folder, "meta", "_journal.json");
@@ -32,18 +32,14 @@ async function prePrivateMessagesFolder() {
   const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
     entries: unknown[];
   };
-  const withoutLast = journal.entries.slice(0, -1);
-  expect(journal.entries.length - withoutLast.length).toBe(1);
-  await writeFile(
-    journalPath,
-    `${JSON.stringify({ ...journal, entries: withoutLast }, null, 2)}\n`,
-  );
+  const entries = journal.entries.slice(0, count);
+  await writeFile(journalPath, `${JSON.stringify({ ...journal, entries }, null, 2)}\n`);
   return folder;
 }
 
 describe("migration 0007_private_messages upgrades a 0006 database", () => {
   it("creates the messaging tables and carries every report across with its resolution metadata", async () => {
-    const oldFolder = await prePrivateMessagesFolder();
+    const oldFolder = await migrationsBefore(7);
     const database = await createTestDatabase({ migrationsFolder: oldFolder });
     cleanup = async () => {
       await database.dispose();
@@ -144,4 +140,57 @@ describe("migration 0007_private_messages upgrades a 0006 database", () => {
         .run(),
     ).rejects.toThrow();
   });
+});
+
+it("preserves existing conversations during the media upgrade and retains cleanup after account deletion", async () => {
+  const oldFolder = await migrationsBefore(8);
+  const database = await createTestDatabase({ migrationsFolder: oldFolder });
+  try {
+    const client = database.db.$client;
+    await client.batch([
+      client.prepare(
+        "insert into user (id, name, email) values ('a', 'A', 'a@example.invalid'), ('b', 'B', 'b@example.invalid')",
+      ),
+      client.prepare("insert into conversation (id, user_a_id, user_b_id) values ('c', 'a', 'b')"),
+      client.prepare(
+        "insert into conversation_participant (conversation_id, user_id, status, last_read_at) values ('c', 'a', 'active', 123), ('c', 'b', 'pending', null)",
+      ),
+      client.prepare(
+        "insert into message (id, conversation_id, sender_id, body, created_at, deleted_at) values ('old', 'c', 'a', 'Retained words', 100, 200)",
+      ),
+    ]);
+    await migrate(drizzle(client), { migrationsFolder: committedMigrationsFolder });
+    expect(
+      await client
+        .prepare("select body, created_at, deleted_at from message where id = 'old'")
+        .first(),
+    ).toEqual({ body: "Retained words", created_at: 100, deleted_at: 200 });
+    expect(
+      await client
+        .prepare("select status, last_read_at from conversation_participant where user_id = 'a'")
+        .first(),
+    ).toEqual({ status: "active", last_read_at: 123 });
+    expect((await client.prepare("PRAGMA foreign_key_check").all()).results).toEqual([]);
+
+    await client.batch([
+      client.prepare(
+        "insert into message (id, conversation_id, sender_id, body) values ('media', 'c', 'a', '')",
+      ),
+      client.prepare(
+        "insert into message_attachment (id, message_id, kind, media_path, content_type, byte_size) values ('image', 'media', 'image', '/media/messages/media/image.png', 'image/png', 100)",
+      ),
+      client.prepare("delete from user where id = 'a'"),
+    ]);
+    expect(await client.prepare("select count(*) as n from message_attachment").first()).toEqual({
+      n: 0,
+    });
+    expect(
+      await client
+        .prepare("select kind, paths from media_intent where scope = 'message:media'")
+        .first(),
+    ).toEqual({ kind: "cleanup", paths: '["/media/messages/media/image.png"]' });
+  } finally {
+    await database.dispose();
+    await rm(oldFolder, { recursive: true, force: true });
+  }
 });

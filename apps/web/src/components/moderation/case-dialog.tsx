@@ -1,3 +1,4 @@
+import { MessageAttachments } from "@/components/message-attachments";
 import { Link } from "@tanstack/react-router";
 import { useAtom, useAtomValue } from "jotai";
 import {
@@ -289,7 +290,7 @@ function TargetMessageCard({
               {m.moderation_case_context_title()}
             </p>
             {evidence.messages.map((row) => (
-              <p
+              <div
                 key={row.id}
                 className={`text-sm leading-relaxed break-words ${
                   row.id === evidence.reportedMessageId
@@ -302,7 +303,10 @@ function TargetMessageCard({
                   {": "}
                 </span>
                 {row.body}
-              </p>
+                {"attachments" in row && (
+                  <MessageAttachments attachments={row.attachments} mine={false} />
+                )}
+              </div>
             ))}
           </div>
         )}
