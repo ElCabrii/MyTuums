@@ -46,6 +46,7 @@ async function application(env: Env) {
     emailSender: { send: sendEmail },
     messageNotifier: createMessageNotifier(env.MESSAGE_HUB),
     videoUploads: null,
+    videoJobs: null,
     linkTransport: {
       lookup: () => Promise.reject(new Error("External requests are outside this fixture.")),
       fetch: () => Promise.reject(new Error("External requests are outside this fixture.")),

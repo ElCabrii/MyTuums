@@ -56,6 +56,7 @@ async function application(env: DevelopmentEnv) {
       webOrigin: origin,
       storage: createR2Storage(env.MEDIA),
       videoUploads: null,
+      videoJobs: null,
       rateLimiter: createDistributedRateLimiter(env.API_COUNTERS),
       emailSender: { send: sendEmail },
       messageNotifier: createMessageNotifier(env.MESSAGE_HUB),

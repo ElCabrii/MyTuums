@@ -1,3 +1,4 @@
+import { messagePreview } from "@/lib/message-preview";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { useEffect } from "react";
@@ -45,7 +46,11 @@ export function MessagesPage() {
     // and the thread each scroll independently inside their own panes and the
     // route itself never scrolls. The route is an app surface rather than a
     // document, which is also why the site footer sits it out (`__root`).
-    <div className="mx-auto grid h-[calc(100dvh-var(--header-height)-var(--mobile-nav-height))] w-full max-w-5xl flex-1 grid-cols-1 grid-rows-1 overflow-hidden md:grid-cols-[minmax(300px,380px)_1fr]">
+    //
+    // Full-bleed on purpose (unlike the document pages' centered column): a
+    // messenger is a two-pane app, and every desktop messenger spends the
+    // whole window on it.
+    <div className="grid h-[calc(100dvh-var(--header-height)-var(--mobile-nav-height))] w-full flex-1 grid-cols-1 grid-rows-1 overflow-hidden md:grid-cols-[minmax(300px,380px)_1fr]">
       {/* A thread, request page or draft composer replaces the list on mobile
           (the thread header's back arrow is the way back); desktop keeps both
           panes side by side. */}
@@ -162,12 +167,8 @@ function ConversationRow({ item }: { item: ConversationItem }) {
   const handle = handleOf(item.user);
   const displayName = item.user.name || handle || m.user_unknown();
   const when = formatRelativeTime(item.lastMessageAt, locale, m.post_just_now());
-  const preview =
-    item.lastMessage === null
-      ? m.messages_empty_preview()
-      : item.lastMessage.body === null
-        ? m.messages_tombstone()
-        : `${item.lastMessage.senderId === item.user.id ? "" : `${m.messages_you()}: `}${item.lastMessage.body}`;
+  const last = item.lastMessage;
+  const preview = `${last?.body && last.senderId !== item.user.id ? `${m.messages_you()}: ` : ""}${messagePreview(last)}`;
 
   return (
     <Button

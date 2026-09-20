@@ -8,6 +8,7 @@ export { createStreamService, type StreamService } from "./stream.js";
 export { createJobDispatcher } from "./jobs.js";
 export { resolveVideoMedia } from "./video-media.js";
 export { canViewPostMedia } from "./post-media.js";
+export { canViewMessageMedia } from "./message-media.js";
 export { canViewProfileMedia } from "./profile-media-authorization.js";
 export { canViewLinkCardMedia } from "./link-card.js";
 export { canViewGameCoverMedia } from "./game-media.js";

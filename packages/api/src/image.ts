@@ -208,6 +208,11 @@ export function objectKeyFromMediaPath(value: string | null | undefined): string
  * of the game and IGDB's image hash. New uploads add a 32-hex catalog version
  * before the extension so delayed cleanup cannot target a later upload.
  * Legacy cover keys remain readable — see `./game-media.ts`.
+ *
+ * A message attachment (issue #408) is `messages/<messageId>/<attachmentId>.<ext>`:
+ * image extensions exactly as posts, plus the voice-note audio containers
+ * (`message-media.ts` writes only the extensions its sniffers can mint).
+ * No variant suffix — messages derive no image variants.
  */
 export function isSafeObjectKey(key: string): boolean {
   return (
@@ -220,6 +225,11 @@ export function isSafeObjectKey(key: string): boolean {
     /^link-cards\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(webp|png|jpg|gif)(?:\.w\d+\.webp)?$/.test(
       key,
     ) ||
-    /^games\/\d+-[a-z0-9]{2,64}(?:\.[a-f0-9]{32})?\.(webp|png|jpg|gif)(?:\.w\d+\.webp)?$/.test(key)
+    /^games\/\d+-[a-z0-9]{2,64}(?:\.[a-f0-9]{32})?\.(webp|png|jpg|gif)(?:\.w\d+\.webp)?$/.test(
+      key,
+    ) ||
+    /^messages\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(webm|m4a|ogg|mp3|aac|wav|webp|png|jpg|gif)$/.test(
+      key,
+    )
   );
 }

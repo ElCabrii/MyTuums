@@ -4,6 +4,7 @@ import {
   type ApiServices,
   type StreamService,
   canViewPostMedia,
+  canViewMessageMedia,
   canViewProfileMedia,
   canViewLinkCardMedia,
   canViewGameCoverMedia,
@@ -38,6 +39,7 @@ export async function createWorkerApplication(options: {
     images: options.images,
     async authorize(key, viewerId) {
       if (key.startsWith("posts/")) return canViewPostMedia(db, key, viewerId);
+      if (key.startsWith("messages/")) return canViewMessageMedia(db, key, viewerId);
       if (key.startsWith("link-cards/")) return canViewLinkCardMedia();
       if (key.startsWith("games/")) return canViewGameCoverMedia();
       return canViewProfileMedia(db, key, viewerId);

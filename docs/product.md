@@ -266,10 +266,14 @@ menu; the navigation bar has no standalone theme button.
 
 ## Private messages
 
-One text-only conversation per pair of users, ever — whoever writes first, the
-thread is the same. Anyone signed in can message anyone except themselves and
-users across a block (either direction); private accounts are messageable like
+One conversation per pair of users, ever — whoever writes first, the thread is
+the same. Anyone signed in can message anyone except themselves and users
+across a block (either direction); private accounts are messageable like
 anyone else.
+
+The `/messages` surface is an app pane, not a document page: it spans the
+full window width on desktop, with the conversation list beside the open
+thread, and it sits out the site footer.
 
 **Message requests** are the anti-spam gate, and deliberately not a per-user
 setting: a first message from someone the recipient does not follow lands as a
@@ -280,10 +284,22 @@ permanently: the sender is never told, their own thread keeps working, and
 messages they keep sending stay invisible to the decliner. The decliner's real
 defense against that is blocking, which refuses sends in both directions.
 
-Bodies are plain text up to 2,000 characters, rendered with the same safe
-linkification as posts. The sender can delete their own message — a tombstone
-reads "message deleted", the conversation's order and any report evidence
-survive. Each side can hide a conversation from their own list. Hidden is not
+A message carries text up to 2,000 characters — rendered with the same safe
+linkification as posts — plus at most one media GROUP: up to four images
+(the post images' formats and byte caps, re-encoded by the composer), one
+voice note (up to five recorded minutes; the composer records it through the
+browser's own recorder and the server sniffs the actual container), or one
+video (the same Stream upload the post composer drives, with the same local
+preflight). A media-only message — a photo with no caption — is legal; a
+message with neither text nor media is not. A video message lands
+immediately and renders as processing until Stream finishes; a failed
+processing renders as unavailable in the thread. Reporting a media message
+snapshots the attachment beside the words, and the moderator's view of it is
+gated on that report — media of unreported messages is reachable by the
+conversation's participants only. The sender can delete their own message —
+a tombstone reads "message deleted", and the conversation's order and any
+report evidence survive; the tombstone hides the attachments with the words.
+Each side can hide a conversation from their own list. Hidden is not
 sealed: the profile's Message action re-opens the shared history under a
 banner saying the conversation is hidden, and sending a message is what
 returns it to the inbox.
@@ -662,11 +678,19 @@ case rather than creating a second one. _Avoid:_ flag, ticket, complaint.
 another user, in both directions. Not a moderation action. _Avoid:_ mute (a
 different thing), shadowban.
 
-**Message** — one private text row inside a conversation, at most 2,000
-characters, rendered with the same safe linkification as a post. A sender's
-deletion is a tombstone ("message deleted"), never a row delete. Reportable
-from the thread; reports carry the message plus its bounded context to
-moderation. _Avoid:_ DM (the whole feature), chat.
+**Message** — one row inside a conversation: text up to 2,000 characters,
+rendered with the same safe linkification as a post, beside at most one media
+group (up to four images, or one voice note, or one video). A sender's
+deletion is a tombstone ("message deleted"), never a row delete, and it hides
+the attachments with the text. Reportable from the thread; reports carry the
+message plus its bounded context (attachments included) to moderation.
+_Avoid:_ DM (the whole feature), chat.
+
+**Voice message** — a recorded audio note sent as a message's single media
+group, up to five recorded minutes. Captured by the composer through the
+browser's recorder; the server sniffs the container and stores the recording
+length as the client's declared measurement, bounded by the byte cap.
+_Avoid:_ audio (generic), memo.
 
 **Conversation** — the single thread two users share, created idempotently by
 the first message and shared whichever of them wrote first. Exactly two

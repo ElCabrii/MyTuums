@@ -63,6 +63,7 @@ async function application(env: Env) {
       twitch: { clientId: "synthetic-twitch", clientSecret: "synthetic-twitch" },
     },
   });
+  const videoJobs = createJobDispatcher(db, { video: env.VIDEO_WORKFLOW });
   return createWorkerApplication({
     auth,
     services: {
@@ -73,11 +74,8 @@ async function application(env: Env) {
       appealToken: createAppealTokenSigner(E2E_AUTH_SECRET),
       emailSender: { send: sendEmail },
       messageNotifier: createMessageNotifier(env.MESSAGE_HUB),
-      videoUploads: createVideoUploads(
-        db,
-        stream,
-        createJobDispatcher(db, { video: env.VIDEO_WORKFLOW }),
-      ),
+      videoJobs: videoJobs,
+      videoUploads: createVideoUploads(db, stream, videoJobs),
       linkTransport: {
         lookup: () =>
           Promise.reject(new Error("External previews are unavailable in this fixture.")),

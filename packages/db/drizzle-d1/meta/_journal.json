@@ -57,6 +57,27 @@
       "when": 1789500232964,
       "tag": "0007_private_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1789654048517,
+      "tag": "0008_message_media",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1789900732094,
+      "tag": "0009_special_shiva",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1789901186706,
+      "tag": "0010_message_media_cleanup",
+      "breakpoints": true
     }
   ]
 }

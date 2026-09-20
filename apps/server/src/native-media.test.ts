@@ -209,6 +209,17 @@ it("serves authorized R2 images and derives bounded variants in the Worker runti
     expect(animation.headers.get("content-type")).toBe("image/gif");
     expect(Buffer.from(await animation.arrayBuffer())).toEqual(gif);
     expect(await bucket.head(`${gifKey}.w96.webp`)).toBeNull();
+    const voiceKey =
+      "messages/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.webm";
+    const voiceBytes = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]);
+    await bucket.put(voiceKey, voiceBytes, { httpMetadata: { contentType: "audio/webm" } });
+    expect((await worker.fetch(`https://media.test/${voiceKey}`)).status).toBe(404);
+    const voiceResponse = await worker.fetch(`https://media.test/${voiceKey}`, {
+      headers: { "x-authorized-key": voiceKey },
+    });
+    expect(voiceResponse.headers.get("content-type")).toBe("audio/webm");
+    expect(voiceResponse.headers.get("cache-control")).toBe("private, no-store");
+    expect(new Uint8Array(await voiceResponse.arrayBuffer())).toEqual(voiceBytes);
     // MIME refusal on a fresh key: the immutable key this test cached earlier
     // cannot be overwritten in production — replacement mints a new UUID path
     // and removes the old row's authorization first.

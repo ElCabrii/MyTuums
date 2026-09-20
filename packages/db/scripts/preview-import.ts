@@ -142,6 +142,7 @@ function prepareImport(
       "conversation",
       "conversation_participant",
       "message",
+      "message_attachment",
     ]);
     for (const name of tableNames) {
       if (!nativeOnly.has(name) && !sourceNames.includes(name))

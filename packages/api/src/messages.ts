@@ -7,21 +7,40 @@ import {
   conversation,
   conversationParticipant,
   follow,
+  mediaIntent,
   message,
+  messageAttachment,
   user,
   userBlock,
+  video,
 } from "@my-tuums/db/schema";
 import {
   CURSOR_MAX_ENCODED_LENGTH,
   MESSAGE_BODY_MAX_LENGTH,
+  MESSAGE_IMAGE_MAX_COUNT,
   MESSAGE_PAGE_SIZE,
   MESSAGE_PAGE_SIZE_MAX,
+  MESSAGE_VOICE_MAX_DURATION_MS,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
+import { jobIntentInsert } from "./jobs.js";
+import { mediaPathFor } from "./image.js";
+import { beginMediaUpload, mediaUploadIsLive } from "./media-intents.js";
+import {
+  acceptVoiceAudio,
+  messageAttachmentsSelection,
+  messageMediaObjectKey,
+  messageVideoMediaPath,
+  previewMediaKind,
+  readMessageImages,
+  type MessageAttachment,
+  type MessageVoiceType,
+} from "./message-media.js";
 import { publishMessageEvent } from "./message-events.js";
 import { keysetPage } from "./pagination.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
+import { requireStorage } from "./profile-media.js";
 import { effectivelyBanned } from "./visibility.js";
 
 /**
@@ -102,15 +121,22 @@ function otherParticipant() {
 /**
  * The last message of each conversation on a page, as a preview: tombstoned
  * bodies redact to null (the placeholder is the client's translation), and
- * the sender id tells the list row whose words the preview carries. One
- * indexed probe per conversation, bounded by the page size — the same
- * page-slice pattern the moderation queue's previews use.
+ * the sender id tells the list row whose words the preview carries. A
+ * media-only message previews through `mediaKind` — the first live
+ * attachment's kind — because it has no body to show. One indexed probe per
+ * conversation, bounded by the page size — the same page-slice pattern the
+ * moderation queue's previews use.
  */
 async function lastMessagePreviews(
   db: Database,
   conversationIds: string[],
-): Promise<Map<string, { senderId: string; body: string | null; createdAt: Date }>> {
-  const previews = new Map<string, { senderId: string; body: string | null; createdAt: Date }>();
+): Promise<
+  Map<string, { senderId: string; body: string | null; mediaKind: string | null; createdAt: Date }>
+> {
+  const previews = new Map<
+    string,
+    { senderId: string; body: string | null; mediaKind: string | null; createdAt: Date }
+  >();
   if (conversationIds.length === 0) return previews;
   const probe = (conversationId: string) =>
     db
@@ -118,6 +144,8 @@ async function lastMessagePreviews(
         conversationId: message.conversationId,
         senderId: message.senderId,
         body: sql<string | null>`case when ${message.deletedAt} is null then ${message.body} end`,
+        mediaKind: sql<string | null>`case when ${message.deletedAt} is null
+          then ${previewMediaKind()} end`,
         createdAt: message.createdAt,
       })
       .from(message)
@@ -138,17 +166,30 @@ async function lastMessagePreviews(
 /** The `message` procedure group: send, the lists, the thread, the participant actions, and the read cursor. */
 export const messageRouter = {
   /**
-   * Sends one message, creating the pair's conversation idempotently on first
-   * contact — there is deliberately no separate "start conversation" step.
+   * Sends one message — text, an image group, a voice note, or a Stream
+   * video — creating the pair's conversation idempotently on first contact;
+   * there is deliberately no separate "start conversation" step.
    *
    * One guarded batch: seed the conversation (`onConflictDoNothing` on the
    * pair key), upsert the sender's participation to `active` (replying to a
    * pending or hidden thread is the implicit accept of ONE's OWN side — the
    * recipient's status is never touched by the sender's writes), create the
    * recipient's participation only if absent (`active` when they follow the
-   * sender at that moment, else `pending`), insert the message, and advance
-   * the ordering cursor only if the message landed. Every statement carries
-   * the same eligibility predicate, so a refused send writes nothing at all.
+   * sender at that moment, else `pending`), insert the message, its
+   * attachment rows, consume the image/voice upload intent or queue the
+   * video's processing job, and advance the ordering cursor only if the
+   * message landed. Every statement carries the same eligibility predicate,
+   * so a refused send writes nothing at all — and no half-sent media either:
+   * leftover objects stay behind the expired intent for the reconciliation
+   * recovery to reap.
+   *
+   * Media arrives one GROUP per message: up to four images (the shared
+   * post-image acceptance), or one voice note (sniffed audio), or one video
+   * the caller has fully uploaded to Stream (`state = 'uploaded'`). The video
+   * path flips the row to `queued` inside this batch and dispatches the
+   * existing processing Workflow after commit — the message renders
+   * immediately; the bubble shows processing until the video's state turns
+   * terminal (`advanceStreamVideo` owns both outcomes).
    *
    * The message's `createdAt` is `max(clock, lastMessageAt + 1)` — strictly
    * increasing per conversation — so the timestamp-only read cursor can never
@@ -161,10 +202,42 @@ export const messageRouter = {
   send: protectedProcedure
     .use(rateLimit(RATE_LIMITS.messageSend))
     .input(
-      z.object({
-        recipientId: z.string().min(1),
-        body: z.string().trim().min(1).max(MESSAGE_BODY_MAX_LENGTH),
-      }),
+      z
+        .object({
+          recipientId: z.string().min(1),
+          // Trim first so whitespace never persists as fake content. Empty is
+          // legal only beside an attachment (the cross-field rule below) —
+          // the database check pins the upper bound alone because it cannot
+          // see the attachment table.
+          body: z.string().trim().max(MESSAGE_BODY_MAX_LENGTH).default(""),
+          images: z.array(z.instanceof(File)).max(MESSAGE_IMAGE_MAX_COUNT).default([]),
+          voice: z.instanceof(File).optional(),
+          /** The composer's measured recording length; the byte cap bounds any lie. */
+          voiceDurationMs: z
+            .number()
+            .int()
+            .min(1)
+            .max(MESSAGE_VOICE_MAX_DURATION_MS + 2000)
+            .optional(),
+          videoId: z.uuid().optional(),
+        })
+        .refine(
+          ({ images, voice, videoId }) =>
+            Number(images.length > 0) + Number(Boolean(voice)) + Number(Boolean(videoId)) <= 1,
+          { error: "A message can contain one media kind.", path: ["images"] },
+        )
+        .refine(
+          ({ body, images, voice, videoId }) =>
+            Boolean(body) || images.length > 0 || Boolean(voice) || Boolean(videoId),
+          {
+            error: "Write a message or attach media.",
+            path: ["body"],
+          },
+        )
+        .refine(({ voice, voiceDurationMs }) => !voice || voiceDurationMs !== undefined, {
+          error: "A voice note needs its recorded duration.",
+          path: ["voiceDurationMs"],
+        }),
     )
     .handler(async ({ input, context }) => {
       const senderId = context.user.id;
@@ -196,10 +269,119 @@ export const messageRouter = {
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
       }
 
-      const [userAId, userBId] = pairOf(senderId, input.recipientId);
-      const eligible = sendEligibility(senderId, input.recipientId);
-      const conversationId = crypto.randomUUID();
+      // Media preparation reads and validates every byte BEFORE anything is
+      // written; a refusal here leaves no record anywhere. Images and voice
+      // ride this RPC (the caps above keep the body inside the RPC ceiling);
+      // the video is already IN Stream — this only validates its row.
       const messageId = crypto.randomUUID();
+      const stagedImages = input.images.length
+        ? (
+            await readMessageImages(input.images, (reason) => {
+              throw new ORPCError("BAD_REQUEST", {
+                message:
+                  reason === "size" || reason === "total"
+                    ? "Those images are too large."
+                    : reason === "type"
+                      ? "That image format isn't supported."
+                      : "That file doesn't look like an image.",
+              });
+            })
+          ).map((image) => {
+            const attachmentId = crypto.randomUUID();
+            return {
+              ...image,
+              attachmentId,
+              key: messageMediaObjectKey(messageId, attachmentId, image.type),
+            };
+          })
+        : [];
+      let stagedVoice: {
+        attachmentId: string;
+        key: string;
+        bytes: Uint8Array;
+        type: MessageVoiceType;
+        durationMs: number;
+      } | null = null;
+      if (input.voice) {
+        const bytes = new Uint8Array(await input.voice.arrayBuffer());
+        const verdict = acceptVoiceAudio(bytes, input.voice.type);
+        if (!verdict.ok || !verdict.type || input.voiceDurationMs === undefined) {
+          throw new ORPCError("BAD_REQUEST", {
+            message:
+              !verdict.ok && verdict.reason === "size"
+                ? "That voice message is too large."
+                : "That file doesn't look like a voice message.",
+          });
+        }
+        const attachmentId = crypto.randomUUID();
+        stagedVoice = {
+          attachmentId,
+          key: messageMediaObjectKey(messageId, attachmentId, verdict.type),
+          bytes,
+          type: verdict.type,
+          durationMs: input.voiceDurationMs,
+        };
+      }
+      let videoRow: { id: string; byteSize: number } | null = null;
+      if (input.videoId) {
+        const [row] = await context.db
+          .select({
+            id: video.id,
+            byteSize: video.byteSize,
+            state: video.state,
+            expiresAt: video.expiresAt,
+          })
+          .from(video)
+          .where(and(eq(video.id, input.videoId), eq(video.authorId, senderId)))
+          .limit(1);
+        if (!row || row.state !== "uploaded" || row.expiresAt.getTime() <= Date.now()) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: "That video is no longer available. Upload it again.",
+          });
+        }
+        videoRow = { id: row.id, byteSize: row.byteSize };
+      }
+
+      // Storage writes happen before the batch, behind a durable intent — the
+      // post-image discipline: an ambiguous or failed send leaves the objects
+      // to the intent's expiry cleanup and inventory reconciliation, never a
+      // delete racing a lost acknowledgement.
+      const stagedBlobs = [...stagedImages, ...(stagedVoice ? [stagedVoice] : [])];
+      const storage = stagedBlobs.length > 0 ? requireStorage(context) : null;
+      const uploadId =
+        stagedBlobs.length > 0
+          ? await beginMediaUpload(
+              context.db,
+              `message:${messageId}`,
+              stagedBlobs.map(({ key }) => mediaPathFor(key)),
+            )
+          : null;
+      if (storage) {
+        try {
+          for (const blob of stagedBlobs) {
+            await storage.put(blob.key, blob.bytes, blob.type);
+          }
+        } catch {
+          // The intent survives for recovery to clean every attempted key.
+          throw new ORPCError("INTERNAL_SERVER_ERROR", {
+            message: "Failed to store the attachment.",
+          });
+        }
+      }
+
+      const [userAId, userBId] = pairOf(senderId, input.recipientId);
+      const eligible = and(
+        sendEligibility(senderId, input.recipientId),
+        uploadId ? mediaUploadIsLive(uploadId) : undefined,
+        // Video availability guards every conversation/participant write as
+        // well as the message, so a refused send has no conversation effects.
+        videoRow
+          ? sql`exists (select 1 from ${video} where ${video.id} = ${videoRow.id}
+              and ${video.authorId} = ${senderId} and ${video.state} = 'uploaded'
+              and ${video.expiresAt} > cast(unixepoch('subsec') * 1000 as integer))`
+          : undefined,
+      )!;
+      const conversationId = crypto.randomUUID();
       const pairRow = sql`from ${conversation} c
         where c.user_a_id = ${userAId} and c.user_b_id = ${userBId} and ${eligible}`;
 
@@ -210,6 +392,29 @@ export const messageRouter = {
       const recipientStatus = sql`case when exists (select 1 from ${follow}
         where ${follow.followerId} = ${input.recipientId} and ${follow.followingId} = ${senderId})
         then 'active' else 'pending' end`;
+
+      const videoAttachmentId = crypto.randomUUID();
+
+      // Attachment rows key on the message actually landing (and re-prove the
+      // sender, so nothing can attach to a foreign message id).
+      const messageLanded = sql`exists (select 1 from ${message}
+        where ${message.id} = ${messageId} and ${message.senderId} = ${senderId})`;
+      const attachmentInsert = (
+        attachmentId: string,
+        position: number,
+        kind: "image" | "voice" | "video",
+        mediaPath: string,
+        contentType: string,
+        byteSize: number,
+        columns: { width?: number; height?: number; durationMs?: number; videoId?: string },
+      ) =>
+        context.db.insert(messageAttachment).select(
+          sql`select ${attachmentId}, m.id, ${position}, ${kind}, ${mediaPath}, ${contentType},
+              ${columns.videoId ?? null}, ${byteSize}, ${columns.width ?? null}, ${columns.height ?? null},
+              ${columns.durationMs ?? null}, cast(unixepoch('subsec') * 1000 as integer)
+              from ${message} m
+              where m.id = ${messageId} and m.sender_id = ${senderId}`,
+        );
 
       const [, , , inserted] = await context.db.batch([
         // Seed the pair's conversation; the loser of a concurrent first-send
@@ -267,14 +472,152 @@ export const messageRouter = {
                 where ${message.id} = ${messageId} and ${message.conversationId} = ${conversation.id})`,
             ),
           ),
+        // Attachment rows, upload-intent consumption and the video's queueing
+        // land only when the message did.
+        ...stagedImages.map((image, position) =>
+          attachmentInsert(
+            image.attachmentId,
+            position,
+            "image",
+            mediaPathFor(image.key),
+            image.type,
+            image.bytes.byteLength,
+            {
+              width: image.width,
+              height: image.height,
+            },
+          ),
+        ),
+        ...(stagedVoice
+          ? [
+              attachmentInsert(
+                stagedVoice.attachmentId,
+                0,
+                "voice",
+                mediaPathFor(stagedVoice.key),
+                stagedVoice.type,
+                stagedVoice.bytes.byteLength,
+                { durationMs: stagedVoice.durationMs },
+              ),
+            ]
+          : []),
+        ...(uploadId
+          ? [
+              context.db
+                .delete(mediaIntent)
+                .where(
+                  and(
+                    eq(mediaIntent.id, uploadId),
+                    sql`exists (select 1 from ${message} where ${message.id} = ${messageId})`,
+                  ),
+                ),
+            ]
+          : []),
+        ...(videoRow
+          ? [
+              attachmentInsert(
+                videoAttachmentId,
+                0,
+                "video",
+                messageVideoMediaPath(videoRow.id),
+                "application/vnd.apple.mpegurl",
+                videoRow.byteSize,
+                { videoId: videoRow.id },
+              ),
+              context.db
+                .update(video)
+                .set({
+                  state: "queued",
+                  expiresAt: sql`cast(unixepoch('subsec') * 1000 as integer) + 1800000`,
+                })
+                .where(
+                  and(
+                    eq(video.id, videoRow.id),
+                    eq(video.authorId, senderId),
+                    eq(video.state, "uploaded"),
+                    messageLanded,
+                  ),
+                ),
+              jobIntentInsert(
+                context.db,
+                { id: `video-${videoRow.id}`, kind: "video", entityId: videoRow.id },
+                messageLanded,
+              ),
+            ]
+          : []),
       ]);
 
       const sent = inserted[0];
       if (!sent) {
         // Eligibility flipped between the pre-read and the batch (a block
-        // landed, the recipient vanished). Nothing was written.
+        // landed, the recipient vanished, the video vanished). Nothing was
+        // written; the objects stay behind the intent for recovery.
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
       }
+
+      // Commit first; the Workflow's own recovery owns a missing dispatch.
+      if (videoRow) {
+        await context.videoJobs?.dispatch(`video-${videoRow.id}`).catch(() => {
+          console.error({ event: "job_dispatch_deferred", jobId: `video-${videoRow.id}` });
+        });
+      }
+
+      const attachments: MessageAttachment[] = [
+        ...stagedImages.map((image, position) => ({
+          id: image.attachmentId,
+          kind: "image" as const,
+          url: mediaPathFor(image.key),
+          contentType: image.type,
+          byteSize: image.bytes.byteLength,
+          position,
+          width: image.width,
+          height: image.height,
+          durationMs: null,
+          video: null,
+        })),
+        ...(stagedVoice
+          ? [
+              {
+                id: stagedVoice.attachmentId,
+                kind: "voice" as const,
+                url: mediaPathFor(stagedVoice.key),
+                contentType: stagedVoice.type,
+                byteSize: stagedVoice.bytes.byteLength,
+                position: 0,
+                width: null,
+                height: null,
+                durationMs: stagedVoice.durationMs,
+                video: null,
+              },
+            ]
+          : []),
+        ...(videoRow
+          ? [
+              {
+                id: videoAttachmentId,
+                kind: "video" as const,
+                url: messageVideoMediaPath(videoRow.id),
+                contentType: "application/vnd.apple.mpegurl",
+                byteSize: videoRow.byteSize,
+                position: 0,
+                width: null,
+                height: null,
+                durationMs: null,
+                video: {
+                  state: "queued" as const,
+                  duration: 0,
+                  posterUrl: messageVideoMediaPath(videoRow.id).replace("master.m3u8", "cover.jpg"),
+                  previewUrl: messageVideoMediaPath(videoRow.id).replace(
+                    "master.m3u8",
+                    "previews.vtt",
+                  ),
+                  captionUrl: null,
+                  captionLanguage: null,
+                },
+              },
+            ]
+          : []),
+      ];
 
       await Promise.all([
         publishMessageEvent(context.messageNotifier, input.recipientId, {
@@ -286,7 +629,7 @@ export const messageRouter = {
           conversationId: sent.conversationId,
         }),
       ]);
-      return { ...sent, body: input.body };
+      return { ...sent, body: input.body, attachments };
     }),
 
   /**
@@ -497,6 +840,10 @@ export const messageRouter = {
         body: sql<string | null>`case when ${message.deletedAt} is null then ${message.body} end`,
         createdAt: message.createdAt,
         deletedAt: message.deletedAt,
+        // Tombstoned messages redact their attachments with their body — the
+        // aggregate gates on the same deletion stamp, so the projection is
+        // the only place that decides.
+        attachments: messageAttachmentsSelection(),
       };
       const page = await keysetPage({
         codec: threadCursor,
