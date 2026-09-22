@@ -129,6 +129,7 @@ export type MessageItem = Omit<MessageThread["items"][number], "envelope"> & {
   disclosure?: string;
   decryptionFailed?: boolean;
 };
+export type MessageAttachment = NonNullable<MessageItem["attachments"]>[number];
 /** A stored message as `message.send` returns it — the optimistic row's authority. */
 export type SentMessage = Omit<
   Awaited<ReturnType<typeof client.message.send>>,

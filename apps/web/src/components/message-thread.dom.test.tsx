@@ -5,7 +5,9 @@ import {
   type LocalIdentity,
 } from "@my-tuums/message-crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { fireEvent, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { createStore } from "jotai";
+import { videoDraftAtomFamily } from "@/atoms/video-upload";
 import { useState, type ReactElement } from "react";
 
 const fakeClient = {
@@ -34,6 +36,7 @@ import { clearMessageDrafts } from "@/atoms/messages";
 import { MessageThreadPane, NewMessagePane } from "@/components/message-thread";
 import { renderWithProviders } from "@/test/render";
 import { createTestQueryClient } from "@/test/factories";
+import { m } from "@/paraglide/messages.js";
 import type { QueryClient } from "@tanstack/react-query";
 
 /** The seeded-thread cache shape read back in the first-contact test. */
@@ -61,6 +64,7 @@ function pageMessage(overrides: Partial<MessageItem> = {}): MessageItem {
     body: "text",
     createdAt: new Date(),
     deletedAt: null,
+    attachments: [],
     ...overrides,
   };
 }
@@ -131,7 +135,9 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 it("acknowledges through the newest displayed message even when it is the viewer's own reply", async () => {
@@ -337,4 +343,302 @@ it("first contact seeds the thread and the draft typed during the move survives 
   );
   await waitFor(() => expect(second.getByText("first contact")).toBeVisible());
   expect(second.getByRole("textbox", { name: "Write a message" })).toHaveValue("still typing");
+});
+
+it("renders message media: image thumbnails, a voice player, and the video's processing/failed states", async () => {
+  const { queryClient, render } = makePane(<MessageThreadPane conversationId="c-media" />);
+  seedThread(
+    queryClient,
+    "c-media",
+    [
+      pageMessage({
+        id: "with-image",
+        body: "",
+        createdAt: new Date(100),
+        attachments: [
+          {
+            id: "att-image",
+            kind: "image",
+            url: "/media/messages/m1/a1.png",
+            contentType: "image/png",
+            byteSize: 10,
+            position: 0,
+            width: 2,
+            height: 2,
+            durationMs: null,
+            video: null,
+          },
+        ],
+      }),
+      pageMessage({
+        id: "with-voice",
+        body: "",
+        createdAt: new Date(200),
+        attachments: [
+          {
+            id: "att-voice",
+            kind: "voice",
+            url: "/media/messages/m2/a2.webm",
+            contentType: "audio/webm",
+            byteSize: 10,
+            position: 0,
+            width: null,
+            height: null,
+            durationMs: 42_000,
+            video: null,
+          },
+        ],
+      }),
+      pageMessage({
+        id: "with-processing-video",
+        body: "",
+        createdAt: new Date(300),
+        attachments: [
+          {
+            id: "att-video",
+            kind: "video",
+            url: "/media/videos/v1/master.m3u8",
+            contentType: "application/vnd.apple.mpegurl",
+            byteSize: 10,
+            position: 0,
+            width: null,
+            height: null,
+            durationMs: null,
+            video: {
+              state: "queued",
+              duration: 0,
+              posterUrl: "/media/videos/v1/cover.jpg",
+              previewUrl: "/media/videos/v1/previews.vtt",
+              captionUrl: null,
+              captionLanguage: null,
+            },
+          },
+        ],
+      }),
+    ],
+    new Date(500),
+  );
+  // The pane renders from the FETCHED page — the mock returns the items.
+  fakeClient.message.thread.mockResolvedValue({
+    conversationId: "c-media",
+    lastReadAt: new Date(500),
+    hidden: false,
+    user: {
+      id: OTHER,
+      name: "Other Person",
+      username: "other",
+      displayUsername: "Other",
+      image: null,
+    },
+    items: [
+      pageMessage({
+        id: "with-image",
+        body: "",
+        createdAt: new Date(100),
+        attachments: [
+          {
+            id: "att-image",
+            kind: "image",
+            url: "/media/messages/m1/a1.png",
+            contentType: "image/png",
+            byteSize: 10,
+            position: 0,
+            width: 2,
+            height: 2,
+            durationMs: null,
+            video: null,
+          },
+        ],
+      }),
+      pageMessage({
+        id: "with-voice",
+        body: "",
+        createdAt: new Date(200),
+        attachments: [
+          {
+            id: "att-voice",
+            kind: "voice",
+            url: "/media/messages/m2/a2.webm",
+            contentType: "audio/webm",
+            byteSize: 10,
+            position: 0,
+            width: null,
+            height: null,
+            durationMs: 42_000,
+            video: null,
+          },
+        ],
+      }),
+      pageMessage({
+        id: "with-processing-video",
+        body: "",
+        createdAt: new Date(300),
+        attachments: [
+          {
+            id: "att-video",
+            kind: "video",
+            url: "/media/videos/v1/master.m3u8",
+            contentType: "application/vnd.apple.mpegurl",
+            byteSize: 10,
+            position: 0,
+            width: null,
+            height: null,
+            durationMs: null,
+            video: {
+              state: "queued",
+              duration: 0,
+              posterUrl: "/media/videos/v1/cover.jpg",
+              previewUrl: "/media/videos/v1/previews.vtt",
+              captionUrl: null,
+              captionLanguage: null,
+            },
+          },
+        ],
+      }),
+    ],
+    nextCursor: null,
+  });
+  const screen = await render();
+
+  // The image rides the shared full-size viewer as a lazy thumbnail.
+  const image = await screen.findByRole("img", {
+    name: m.messages_media_image_label({ name: "1" }),
+  });
+  expect(image).toHaveAttribute("src", "/media/messages/m1/a1.png");
+  // The voice note is one self-contained play control with its declared length.
+  expect(screen.getByRole("button", { name: m.messages_voice_play() })).toBeVisible();
+  expect(screen.getByText("0:42")).toBeVisible();
+  // A queued video renders the bounded processing state, never a player.
+  expect(screen.getByText(m.messages_video_processing())).toBeVisible();
+  expect(screen.queryByTitle(m.video_player_label())).toBeNull();
+});
+
+it("renders a failed video attachment as unavailable, not as a player", async () => {
+  const { queryClient, render } = makePane(<MessageThreadPane conversationId="c-failed" />);
+  seedThread(
+    queryClient,
+    "c-failed",
+    [
+      pageMessage({
+        id: "with-failed-video",
+        body: "",
+        createdAt: new Date(100),
+        attachments: [
+          {
+            id: "att-failed",
+            kind: "video",
+            url: "/media/videos/v2/master.m3u8",
+            contentType: "application/vnd.apple.mpegurl",
+            byteSize: 10,
+            position: 0,
+            width: null,
+            height: null,
+            durationMs: null,
+            video: {
+              state: "failed",
+              duration: 0,
+              posterUrl: "/media/videos/v2/cover.jpg",
+              previewUrl: "/media/videos/v2/previews.vtt",
+              captionUrl: null,
+              captionLanguage: null,
+            },
+          },
+        ],
+      }),
+    ],
+    null,
+  );
+  fakeClient.message.thread.mockResolvedValue({
+    conversationId: "c-failed",
+    lastReadAt: null,
+    hidden: false,
+    user: {
+      id: OTHER,
+      name: "Other Person",
+      username: "other",
+      displayUsername: "Other",
+      image: null,
+    },
+    items: [
+      pageMessage({
+        id: "with-failed-video",
+        body: "",
+        createdAt: new Date(100),
+        attachments: [
+          {
+            id: "att-failed",
+            kind: "video",
+            url: "/media/videos/v2/master.m3u8",
+            contentType: "application/vnd.apple.mpegurl",
+            byteSize: 10,
+            position: 0,
+            width: null,
+            height: null,
+            durationMs: null,
+            video: {
+              state: "failed",
+              duration: 0,
+              posterUrl: "/media/videos/v2/cover.jpg",
+              previewUrl: "/media/videos/v2/previews.vtt",
+              captionUrl: null,
+              captionLanguage: null,
+            },
+          },
+        ],
+      }),
+    ],
+    nextCursor: null,
+  });
+  const screen = await render();
+  await waitFor(() => expect(screen.getByText(m.messages_video_failed())).toBeVisible());
+});
+
+it("keeps the caption unsendable until the selected video upload finishes", async () => {
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:video-test");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  const conversationId = "uploading-video";
+  const queryClient = createTestQueryClient();
+  queryClient.setQueryData(["message-access", VIEWER], {
+    local,
+    identity: local.public,
+    recovery: null,
+  });
+  const store = createStore();
+  const draftAtom = videoDraftAtomFamily(`message:${OTHER}`);
+  const draft = {
+    selectionId: "selection",
+    file: new File(["video"], "clip.mp4", { type: "video/mp4" }),
+    videoId: "video-id",
+    status: "uploading" as const,
+    bytes: 0,
+    controller: new AbortController(),
+  };
+  store.set(draftAtom, draft);
+  seedThread(queryClient, conversationId, [], null);
+  fakeClient.message.thread.mockResolvedValue({
+    conversationId,
+    lastReadAt: null,
+    hidden: false,
+    user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
+    items: [],
+    nextCursor: null,
+  });
+  const screen = await renderWithProviders(<MessageThreadPane conversationId={conversationId} />, {
+    store,
+    queryClient,
+    signedInAs: { id: VIEWER },
+  });
+  fireEvent.change(await screen.findByRole("textbox"), { target: { value: "caption" } });
+  expect(screen.getByRole("button", { name: m.messages_send() })).toBeDisabled();
+  act(() => store.set(draftAtom, { ...draft, status: "uploaded" }));
+  expect(screen.getByRole("button", { name: m.messages_send() })).toBeEnabled();
 });

@@ -567,6 +567,16 @@ view-history store to leak.
   actions; a `case_resolved` audit row for a message case names the sender,
   with the message id in its `details`. Deleting the reported message does
   not withdraw the evidence — the report row is deliberately FK-less.
+  Message attachment reads require a conversation participant and a live
+  message, or a moderator and an exact media path captured in a submitted
+  report (including its bounded context). A report never unlocks the whole
+  conversation. Snapshots retain all images, voice and video metadata; message
+  tombstones preserve their media for reporting. Hard account deletion can
+  retire the underlying bytes while report metadata remains. Voice uploads
+  are limited to 10 MB and sniffed against a closed container allowlist; the
+  five-minute duration is a bounded client declaration, not trusted proof of
+  the encoded audio length. Video access uses the existing short-lived Stream
+  capability, with the same revocation window as post videos.
 - The bootstrap promotion (`pnpm db:promote`, with `--remote` for PoC D1)
   is the one deliberate exception to "role changes go through `/rpc`": it
   exists to appoint the first admin before anyone can moderate. It is
@@ -638,7 +648,9 @@ view-history store to leak.
 
 ## Recoverable message encryption
 
-New messages use client-side encryption with provider-held recovery keys.
+New message text uses client-side encryption with provider-held recovery keys.
+Image, voice and video attachments use the existing server-managed media pipeline
+and remain accessible to the service and storage providers.
 The accepted email-only history-recovery policy prevents a provider-inaccessible
 E2EE claim. D1 holds encrypted bodies and wrapped identity backups; the same
 application Worker holds the recovery secret. Account/email or Worker compromise

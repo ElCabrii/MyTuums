@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
 import {
   conversation,
@@ -7,10 +7,13 @@ import {
   messageIdentity,
   report,
   user,
+  video,
+  messageAttachment,
 } from "@my-tuums/db/schema";
 import { identitySchema, verifyDisclosedMessage } from "@my-tuums/message-crypto";
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
+import { messageAttachmentsSelection, messageAttachmentSchema } from "./message-media.js";
 
 /**
  * The evidence half of reporting a private message (issue #408).
@@ -31,30 +34,63 @@ import { z } from "zod";
 export const MESSAGE_REPORT_CONTEXT = 10;
 
 /** The stored snapshot: reported message plus its context window, oldest first. */
-export const messageReportSnapshot = z.object({
-  version: z.literal(1),
-  reportedMessageId: z.uuid(),
-  messages: z.array(
-    z.object({
-      id: z.uuid(),
-      senderId: z.string().min(1),
-      /** The sender's handle when the snapshot was taken; null never renders. */
-      senderHandle: z.string().nullable(),
-      /** The retained body — read regardless of any later deletion. */
-      body: z.string(),
-      createdAt: z.iso.datetime(),
-    }),
-  ),
-});
+export const messageReportSnapshot = z.discriminatedUnion("version", [
+  z.object({
+    version: z.literal(1),
+    reportedMessageId: z.uuid(),
+    messages: z.array(
+      z.object({
+        id: z.uuid(),
+        senderId: z.string().min(1),
+        /** The sender's handle when the snapshot was taken; null never renders. */
+        senderHandle: z.string().nullable(),
+        /** The retained body — read regardless of any later deletion. */
+        body: z.string(),
+        createdAt: z.iso.datetime(),
+      }),
+    ),
+  }),
+  z.object({
+    version: z.literal(2),
+    reportedMessageId: z.uuid(),
+    messages: z.array(
+      z.object({
+        id: z.uuid(),
+        senderId: z.string().min(1),
+        senderHandle: z.string().nullable(),
+        body: z.string(),
+        createdAt: z.iso.datetime(),
+        /** Empty for text-only messages. */
+        attachments: z.array(messageAttachmentSchema),
+      }),
+    ),
+  }),
+]);
 
 export type MessageReportSnapshot = z.infer<typeof messageReportSnapshot>;
 
 /**
- * Encrypted reports contain only the participant-disclosed, signature-verified
- * message. Legacy reports contain the message itself plus up to
+ * Reads any snapshot version back. v1 rows predate message media and parse as
+ * their own shape; every renderer treats missing `attachments` as text-only.
+ */
+export function parseMessageReportSnapshot(raw: string | null): MessageReportSnapshot | null {
+  if (!raw) return null;
+  try {
+    const parsed = messageReportSnapshot.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Encrypted reports include only the disclosed message and its attachments.
+ * Legacy reports include the message itself plus up to
  * `MESSAGE_REPORT_CONTEXT` messages before it in the thread's keyset order,
  * reversed to reading order (oldest first) so the case view renders the
- * exchange top-down. Null when the message does not exist.
+ * exchange top-down. Null when the message does not exist. Each row carries
+ * all retained attachments (v2): media is evidence exactly like words are, and the
+ * report gate is what makes it viewable to the moderator.
  *
  * The caller authorizes FIRST (the reporter must be a participant of the
  * conversation — see `moderation.report`); this read is the evidence.
@@ -70,6 +106,7 @@ export async function buildMessageReportSnapshot(
       createdAt: message.createdAt,
       envelope: message.envelope,
       senderId: message.senderId,
+      attachments: messageAttachmentsSelection(true),
     })
     .from(message)
     .where(eq(message.id, messageId))
@@ -102,7 +139,7 @@ export async function buildMessageReportSnapshot(
       if (verified.id !== messageId || verified.recipientId !== recipientId)
         throw new Error("Incorrect report target.");
       return {
-        version: 1,
+        version: 2,
         reportedMessageId: messageId,
         messages: [
           {
@@ -110,6 +147,7 @@ export async function buildMessageReportSnapshot(
             senderId: target.senderId,
             senderHandle: sender.handle,
             body: verified.body,
+            attachments: target.attachments,
             createdAt: target.createdAt.toISOString(),
           },
         ],
@@ -126,6 +164,7 @@ export async function buildMessageReportSnapshot(
       senderHandle: user.username,
       body: message.body,
       createdAt: message.createdAt,
+      attachments: messageAttachmentsSelection(true),
     })
     .from(message)
     .innerJoin(user, eq(user.id, message.senderId))
@@ -140,7 +179,7 @@ export async function buildMessageReportSnapshot(
     .limit(MESSAGE_REPORT_CONTEXT + 1);
 
   return {
-    version: 1,
+    version: 2,
     reportedMessageId: messageId,
     messages: rows.reverse().map((row) => ({
       id: row.id,
@@ -148,19 +187,47 @@ export async function buildMessageReportSnapshot(
       senderHandle: row.senderHandle,
       body: row.body,
       createdAt: row.createdAt.toISOString(),
+      attachments: row.attachments,
     })),
   };
 }
 
-/** Parses a stored snapshot; null when the row predates the format or corrupts. */
-export function parseMessageReportSnapshot(raw: string | null): MessageReportSnapshot | null {
-  if (!raw) return null;
-  try {
-    const parsed = messageReportSnapshot.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
+/** Evidence is immutable, but an already captured video's processing can finish later. */
+export async function refreshMessageReportVideos(db: Database, snapshot: MessageReportSnapshot) {
+  if (snapshot.version !== 2) return snapshot;
+  const ids = snapshot.messages.flatMap((entry) =>
+    entry.attachments.filter((item) => item.kind === "video").map((item) => item.id),
+  );
+  if (ids.length === 0) return snapshot;
+  const rows = await db
+    .select({ id: messageAttachment.id, state: video.state, playback: video.playback })
+    .from(messageAttachment)
+    .innerJoin(video, eq(video.id, messageAttachment.videoId))
+    .where(inArray(messageAttachment.id, ids));
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return {
+    ...snapshot,
+    messages: snapshot.messages.map((entry) => ({
+      ...entry,
+      attachments: entry.attachments.map((attachment) => {
+        if (attachment.kind !== "video") return attachment;
+        const current = byId.get(attachment.id);
+        return {
+          ...attachment,
+          width: current?.playback?.width ?? attachment.width,
+          height: current?.playback?.height ?? attachment.height,
+          video:
+            current && attachment.video
+              ? {
+                  ...attachment.video,
+                  state: current.state,
+                  duration: current.playback?.duration ?? 0,
+                }
+              : null,
+        };
+      }),
+    })),
+  };
 }
 
 /**

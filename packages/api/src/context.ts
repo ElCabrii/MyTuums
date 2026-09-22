@@ -5,6 +5,7 @@ import type { MessageNotifier } from "./message-events.js";
 import type { MessageRecoveryKeys } from "./message-recovery-keys.js";
 import type { RateLimiter } from "./rate-limit.js";
 import type { ObjectStorage } from "./object-storage.js";
+import type { JobDispatcher } from "./jobs.js";
 import type { VideoUploads } from "./video-uploads.js";
 
 import type { AppealTokenSigner } from "./appeal-token.js";
@@ -24,6 +25,13 @@ export interface ApiServices {
   rateLimiter: RateLimiter;
   storage: ObjectStorage | null;
   videoUploads: VideoUploads | null;
+  /**
+   * The video Workflow dispatcher, null where no VIDEO_WORKFLOW binding
+   * exists (tests without one). `message.send` needs it directly: a video
+   * message's job intent commits inside the send batch, so dispatch must be
+   * reachable there — `videoUploads` owns its own submits' dispatches.
+   */
+  videoJobs: JobDispatcher | null;
   linkTransport: LinkFetchTransport;
   emailSender: EmailSender;
   /** Null where no MessageHub binding exists (jobs, tests without one). */

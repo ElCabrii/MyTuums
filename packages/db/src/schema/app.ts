@@ -1231,9 +1231,10 @@ export const conversationParticipant = sqliteTable(
 );
 
 /**
- * One direct message (issue #408). Plain text only in v1 — no media, no
- * edits, no per-row delivery state. D1 is the single source of truth; the
- * real-time layer is a best-effort push on top.
+ * One direct message (issue #408). Text plus at most one media GROUP — up to
+ * four images, one voice note, or one Stream video — no edits, no per-row
+ * delivery state. D1 is the single source of truth; the real-time layer is a
+ * best-effort push on top.
  *
  * `createdAt` is assigned by the send batch as
  * `max(clock, conversation.lastMessageAt + 1)`: timestamps strictly increase
@@ -1242,10 +1243,17 @@ export const conversationParticipant = sqliteTable(
  * the reader has seen. The keyset cursor still carries `id` as a tie-breaker
  * for ordering, but the read cursor relies on strict monotonicity.
  *
+ * Legacy rows retain their text or empty media-only caption. New rows store
+ * the fixed [encrypted] placeholder and an envelope; migration 0012 enforces
+ * that boundary. The browser enforces text-or-media before encryption, since
+ * the server cannot inspect encrypted captions.
+ *
  * Sender deletion is a tombstone (`deletedAt`), never a row delete — the
  * conversation's order survives, and the stored body remains as report
- * evidence. Normal API projections redact the body of a tombstoned row;
- * `moderation.report` reads it back from the snapshot it captured anyway.
+ * evidence. Normal API projections redact the body AND attachments of a
+ * tombstoned row; `moderation.report` reads the text back from the snapshot
+ * it captured anyway, and its media through the report-gated moderator pass
+ * of the media authorizer.
  */
 export const message = sqliteTable(
   "message",
@@ -1260,9 +1268,7 @@ export const message = sqliteTable(
     senderId: text("sender_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    // SQLite's length() counts characters and JavaScript's `.length` counts
-    // UTF-16 units, so a zod-checked 2000-unit string is always within this
-    // bound — never longer.
+    // Legacy plaintext only; new messages use [encrypted] and the envelope below.
     body: text("body").notNull(),
     envelope: text("envelope"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
@@ -1271,7 +1277,7 @@ export const message = sqliteTable(
     deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
   },
   (t) => [
-    check("message_body_length", sql`length(trim(${t.body})) between 1 and 2000`),
+    check("message_body_length", sql`length(trim(${t.body})) <= 2000`),
     // The thread walk's keyset order: newest first, `id` breaking ties —
     // mirrored by the thread cursor in packages/api/src/messages.ts.
     index("message_conversation_created_idx").on(t.conversationId, desc(t.createdAt), desc(t.id)),
@@ -1304,6 +1310,69 @@ export const messageRecovery = sqliteTable("message_recovery", {
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
   attempts: integer("attempts").notNull().default(0),
 });
+
+/**
+ * One media attachment of a direct message (issue #408): an image group
+ * member (positions 0..3), a voice note, or a Stream video. The relation is
+ * the authoritative projection for every thread reader and the media
+ * authorization gate, exactly as `post_attachment` is for posts.
+ *
+ * Exactly one of the three kinds is present per row:
+ *
+ * - `image` — sniffed and dimension-validated bytes in the private bucket
+ *   under `messages/<messageId>/`; `width`/`height` are
+ *   server-derived and always set.
+ * - `voice` — sniffed audio bytes at the same key shape; `durationMs` is the
+ *   client's declared recording length (bounded by the byte cap; audio
+ *   duration is not cheaply verifiable server-side, like a video's accepted
+ *   `byteSize`).
+ * - `video` — no object of our own: `mediaPath` names the Stream manifest
+ *   (`/media/videos/<videoId>/master.m3u8`) and `videoId` joins the video
+ *   row whose `playback` carries the real dimensions and duration once
+ *   processing finishes. The message lands immediately; a thread renders the
+ *   attachment as processing until the video's state turns terminal.
+ *
+ * Rows are immutable and never deleted before their message is (a
+ * tombstoned message keeps its rows as report evidence; only the
+ * projections hide them). Sender-account hard deletion cascades the message
+ * and this row; the video row survives with its cleanup trigger, mirroring
+ * the post-attachment cascade.
+ */
+export const messageAttachment = sqliteTable(
+  "message_attachment",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => message.id, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
+    kind: text("kind").$type<"image" | "voice" | "video">().notNull(),
+    mediaPath: text("media_path").notNull(),
+    contentType: text("content_type").notNull(),
+    videoId: text("video_id").references(() => video.id, { onDelete: "set null" }),
+    byteSize: integer("byte_size").notNull(),
+    width: integer("width"),
+    height: integer("height"),
+    durationMs: integer("duration_ms"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
+  },
+  (t) => [
+    check("message_attachment_kind", sql`${t.kind} in ('image', 'voice', 'video')`),
+    check("message_attachment_media_size", sql`${t.byteSize} > 0`),
+    // The thread projection's one correlated aggregate per message page,
+    // keyed by message; no other access path exists (the media gate probes by
+    // media_path, a bounded unique-in-practice lookup over this index's
+    // table, which the reports' evidence reads use only through the case
+    // view's message id).
+    index("message_attachment_message_idx").on(t.messageId),
+    uniqueIndex("message_attachment_media_path_idx").on(t.mediaPath),
+    uniqueIndex("message_attachment_video_idx").on(t.videoId),
+  ],
+);
 
 /**
  * A resolved link preview card, keyed by the normalized URL it describes

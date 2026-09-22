@@ -62,7 +62,8 @@ creator lookup target; retirement of terminal rows must not recreate cleanup.
 Publication's D1 batch first latches author/target/deadline eligibility. Its
 intermediate published state has no post ID until the same batch inserts the
 post and effects and attaches its ID; no caller can observe that intermediate
-state. A committed published row with no post ID is an orphan, never playable.
+state. A committed published row without a post ID is playable only when referenced
+by a message attachment; otherwise it is an orphan.
 Failure commits its notification, pending-text erasure and cleanup together.
 Provider operations always happen outside the database transaction.
 
@@ -244,4 +245,16 @@ resource identities, backups and cutover gates.
 
 ## Recoverable messages
 
-Messaging migration 0008 adds encrypted envelopes, immutable account identity backups and session/email-bound recovery challenges. Custom migration 0009 forbids new plaintext inserts and body/envelope updates, preserving legacy reads and tombstones. Do not drop these triggers during table rebuilds or server rollback. See [encryption storage and rollout](../../docs/message-encryption.md).
+Messaging migration 0011 adds encrypted envelopes, immutable account identity backups and session/email-bound recovery challenges. Custom migration 0012 forbids new plaintext inserts and body/envelope updates, preserving legacy reads and tombstones. Do not drop these triggers during table rebuilds or server rollback. See [encryption storage and rollout](../../docs/message-encryption.md).
+
+## Message media migrations
+
+`0008_message_media.sql` adds `message_attachment` and permits empty message
+bodies; the send procedure enforces text-or-media across the two tables.
+`0009_special_shiva.sql` adds unique media-path/video indexes and changes the
+video foreign key to SET NULL so failed-video cleanup preserves the message.
+`0010_message_media_cleanup.sql` records image/voice and video cleanup on hard
+attachment deletion, including account cascades. Message tombstones retain
+attachments for reports. The Stream cleanup trigger distinguishes a lost post
+reference from a published message video, which legitimately has no post ID.
+Preserve these custom triggers when rebuilding attachment or video tables.

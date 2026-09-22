@@ -16,7 +16,11 @@ import { EDIT_HISTORY_CASE_LIMIT } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { deliverModerationEmails, moderationEmailInsert } from "./moderation-email.js";
 import { noteInput, queueInput } from "./moderation-inputs.js";
-import { messageCaseSender, parseMessageReportSnapshot } from "./message-report.js";
+import {
+  messageCaseSender,
+  parseMessageReportSnapshot,
+  refreshMessageReportVideos,
+} from "./message-report.js";
 import { postAttachmentsSelection, type PostAttachment } from "./post-media.js";
 import { moderatorProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
@@ -417,10 +421,21 @@ export const queueRouter = {
                 .innerJoin(user, eq(user.id, message.senderId))
                 .where(eq(message.id, input.targetId))
                 .limit(1);
-              const evidence = reports.flatMap((row) => {
-                const snapshot = parseMessageReportSnapshot(row.snapshotContent);
-                return snapshot ? [{ reporterId: row.reporterId, snapshot }] : [];
-              });
+              const evidence = (
+                await Promise.all(
+                  reports.map(async (row) => {
+                    const snapshot = parseMessageReportSnapshot(row.snapshotContent);
+                    return snapshot
+                      ? [
+                          {
+                            reporterId: row.reporterId,
+                            snapshot: await refreshMessageReportVideos(context.db, snapshot),
+                          },
+                        ]
+                      : [];
+                  }),
+                )
+              ).flat();
               return {
                 kind: "message" as const,
                 message: row ?? null,

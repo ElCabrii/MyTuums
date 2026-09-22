@@ -852,3 +852,31 @@ throughout on purpose.
 ## Recoverable messages
 
 `src/message-keys.ts` owns messaging identity registration and session-bound email recovery; `src/message-recovery-keys.ts` owns the injected provider keyring. New sends accept encrypted envelopes only; reports verify participant-disclosed signed plaintext. See [recoverable message encryption](../../docs/message-encryption.md) for the trust boundary and tests.
+
+## Private message media
+
+`src/messages.ts` accepts an encrypted text envelope with at most one attachment group: up to four
+images, one voice message, or one already-uploaded Stream video. Media-only
+messages have an encrypted empty caption. Attachment bytes retain server-managed
+processing and storage; they are not client-encrypted. `src/message-media.ts` owns validation, attachment
+projection and participant/report authorization; image limits reuse post rules.
+Voice bytes are capped at 10 MB and container-sniffed; duration is a bounded
+client measurement, not a server-verified playback length.
+
+Image/voice writes register an upload intent before R2 I/O and require that
+intent to remain live in the guarded send batch. Video availability guards the
+conversation and participant writes too, so a refused send cannot create a
+request or reactivate a hidden conversation. Video queueing and its job
+intent commit with the message. Stream publication for a message sets the
+video's published state without creating a post. A failed video's row can be
+retired while its message attachment remains as an unavailable placeholder.
+
+Report snapshots v2 retain every attachment in the bounded context window; v1
+text snapshots remain readable. Moderator media authorization matches exact
+paths captured in submitted reports, including context, without granting access
+to the rest of the conversation. The case reader refreshes captured videos'
+processing metadata. Sender tombstones hide media from participants but retain
+it for reporting; account deletion can retire the underlying storage.
+`readMediaReferences` includes message attachments and reconciliation scans the
+`messages/` prefix. Verify through messages, Stream-job, video-media and
+message-migration integration tests, plus message-media unit tests.

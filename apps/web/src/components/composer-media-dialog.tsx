@@ -16,11 +16,25 @@ import { m } from "@/paraglide/messages.js";
 export function ComposerMediaDialog({
   disabled,
   onSelect,
+  description,
+  hints,
 }: {
   disabled: boolean;
   onSelect: (files: File[]) => void;
+  /**
+   * Optional copy overrides for hosts whose media rules differ from the post
+   * composer's (the message composer allows a voice note and forbids nothing
+   * about posts). Defaults stay the post wording, so every existing caller is
+   * unchanged.
+   */
+  description?: string;
+  hints?: readonly string[];
 }) {
   const [open, setOpen] = useState(false);
+  const resolvedHints = hints ?? [
+    m.post_images_hint(),
+    m.video_input_hint({ maxMb: String(VIDEO_MAX_BYTES / 1_000_000) }),
+  ];
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
@@ -34,7 +48,7 @@ export function ComposerMediaDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{m.post_add_media()}</DialogTitle>
-          <DialogDescription>{m.post_media_hint()}</DialogDescription>
+          <DialogDescription>{description ?? m.post_media_hint()}</DialogDescription>
         </DialogHeader>
         <label className="border-border flex flex-col items-center gap-3 rounded-xl border border-dashed p-5 text-center text-sm">
           <ImagePlus className="text-muted-foreground size-8" aria-hidden="true" />
@@ -54,8 +68,9 @@ export function ComposerMediaDialog({
           />
         </label>
         <div className="text-muted-foreground space-y-2 text-xs">
-          <p>{m.post_images_hint()}</p>
-          <p>{m.video_input_hint({ maxMb: String(VIDEO_MAX_BYTES / 1_000_000) })}</p>
+          {resolvedHints.map((hint) => (
+            <p key={hint}>{hint}</p>
+          ))}
         </div>
       </DialogContent>
     </Dialog>

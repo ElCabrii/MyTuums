@@ -144,7 +144,7 @@ describe("migration 0007_private_messages upgrades a 0006 database", () => {
 });
 
 it("encryption migrations preserve legacy history and reject plaintext writers after rollout", async () => {
-  const oldFolder = await migrationsBefore(8);
+  const oldFolder = await migrationsBefore(11);
   const database = await createTestDatabase({ migrationsFolder: oldFolder });
   cleanups.push(async () => {
     await database.dispose();
@@ -187,4 +187,57 @@ it("encryption migrations preserve legacy history and reject plaintext writers a
   expect(
     await client.prepare("select count(*) as count from message where deleted_at = 100").first(),
   ).toEqual({ count: 2 });
+});
+
+it("preserves existing conversations during the media upgrade and retains cleanup after account deletion", async () => {
+  const oldFolder = await migrationsBefore(8);
+  const database = await createTestDatabase({ migrationsFolder: oldFolder });
+  try {
+    const client = database.db.$client;
+    await client.batch([
+      client.prepare(
+        "insert into user (id, name, email) values ('a', 'A', 'a@example.invalid'), ('b', 'B', 'b@example.invalid')",
+      ),
+      client.prepare("insert into conversation (id, user_a_id, user_b_id) values ('c', 'a', 'b')"),
+      client.prepare(
+        "insert into conversation_participant (conversation_id, user_id, status, last_read_at) values ('c', 'a', 'active', 123), ('c', 'b', 'pending', null)",
+      ),
+      client.prepare(
+        "insert into message (id, conversation_id, sender_id, body, created_at, deleted_at) values ('old', 'c', 'a', 'Retained words', 100, 200)",
+      ),
+    ]);
+    await migrate(drizzle(client), { migrationsFolder: committedMigrationsFolder });
+    expect(
+      await client
+        .prepare("select body, created_at, deleted_at from message where id = 'old'")
+        .first(),
+    ).toEqual({ body: "Retained words", created_at: 100, deleted_at: 200 });
+    expect(
+      await client
+        .prepare("select status, last_read_at from conversation_participant where user_id = 'a'")
+        .first(),
+    ).toEqual({ status: "active", last_read_at: 123 });
+    expect((await client.prepare("PRAGMA foreign_key_check").all()).results).toEqual([]);
+
+    await client.batch([
+      client.prepare(
+        "insert into message (id, conversation_id, sender_id, body, envelope) values ('media', 'c', 'a', '[encrypted]', '{}')",
+      ),
+      client.prepare(
+        "insert into message_attachment (id, message_id, kind, media_path, content_type, byte_size) values ('image', 'media', 'image', '/media/messages/media/image.png', 'image/png', 100)",
+      ),
+      client.prepare("delete from user where id = 'a'"),
+    ]);
+    expect(await client.prepare("select count(*) as n from message_attachment").first()).toEqual({
+      n: 0,
+    });
+    expect(
+      await client
+        .prepare("select kind, paths from media_intent where scope = 'message:media'")
+        .first(),
+    ).toEqual({ kind: "cleanup", paths: '["/media/messages/media/image.png"]' });
+  } finally {
+    await database.dispose();
+    await rm(oldFolder, { recursive: true, force: true });
+  }
 });

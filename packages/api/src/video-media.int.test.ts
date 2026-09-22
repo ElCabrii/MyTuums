@@ -1,4 +1,13 @@
-import { post, postAttachment, user, video } from "@my-tuums/db/schema";
+import {
+  conversation,
+  conversationParticipant,
+  message,
+  messageAttachment,
+  post,
+  postAttachment,
+  user,
+  video,
+} from "@my-tuums/db/schema";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, expect, it } from "vitest";
 import { createTestUser, seedPosts, truncateAll } from "./testing/harness.js";
@@ -102,6 +111,75 @@ it("rechecks visibility after a provider round-trip and never serves an unpublis
   expect(
     await resolveVideoMedia(db, delivery, item.prefix + "master.m3u8", item.author.id),
   ).toBeNull();
+});
+
+/**
+ * A video attached to a private message has no post — its playback gates on
+ * the conversation's participants (issue #408), and on nobody else: a
+ * message video never becomes public, whatever its conversation later does.
+ */
+it("gates a message video on the conversation's participants and never serves it publicly", async () => {
+  const sender = await createTestUser();
+  const recipient = await createTestUser();
+  const stranger = await createTestUser();
+  const [userAId, userBId] =
+    sender.id < recipient.id ? [sender.id, recipient.id] : [recipient.id, sender.id];
+  const conversationId = crypto.randomUUID();
+  const messageId = crypto.randomUUID();
+  const videoId = crypto.randomUUID();
+  await db.batch([
+    db.insert(conversation).values({ id: conversationId, userAId, userBId }),
+    db.insert(conversationParticipant).values([
+      { conversationId, userId: sender.id, status: "active" },
+      { conversationId, userId: recipient.id, status: "active" },
+    ]),
+    db.insert(message).values({
+      id: messageId,
+      conversationId,
+      senderId: sender.id,
+      body: "[encrypted]",
+      envelope: "{}",
+    }),
+    db.insert(video).values({
+      id: videoId,
+      authorId: sender.id,
+      state: "published",
+      streamCreatorId: `mytuums-test:${videoId}`,
+      streamUid: videoId.replaceAll("-", ""),
+      byteSize: 100,
+      expiresAt: new Date(),
+      playback: { width: 640, height: 360, duration: 4.5, captionLanguage: null },
+    }),
+    db.insert(messageAttachment).values({
+      messageId,
+      kind: "video",
+      mediaPath: `/media/videos/${videoId}/master.m3u8`,
+      contentType: "application/vnd.apple.mpegurl",
+      byteSize: 100,
+      videoId,
+    }),
+  ]);
+  const prefix = `videos/${videoId}/`;
+
+  // Participants — both sides, whichever sent — read the manifest and poster.
+  expect(await resolveVideoMedia(db, delivery, prefix + "master.m3u8", sender.id)).not.toBeNull();
+  expect(await resolveVideoMedia(db, delivery, prefix + "cover.jpg", recipient.id)).not.toBeNull();
+  // A stranger does not, and no anonymous viewer ever does.
+  expect(await resolveVideoMedia(db, delivery, prefix + "master.m3u8", stranger.id)).toBeNull();
+  expect(await resolveVideoMedia(db, delivery, prefix + "cover.jpg", null)).toBeNull();
+
+  // Hiding the sender's side does not close the other side's read.
+  await db
+    .update(conversationParticipant)
+    .set({ status: "hidden" })
+    .where(eq(conversationParticipant.conversationId, conversationId));
+  expect(
+    await resolveVideoMedia(db, delivery, prefix + "master.m3u8", recipient.id),
+  ).not.toBeNull();
+
+  // A tombstoned message closes its media for participants too.
+  await db.update(message).set({ deletedAt: new Date() }).where(eq(message.id, messageId));
+  expect(await resolveVideoMedia(db, delivery, prefix + "master.m3u8", recipient.id)).toBeNull();
 });
 
 it("builds a bounded preview index whose image requests still pass through authorization", async () => {

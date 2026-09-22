@@ -82,6 +82,7 @@ async function application(env: AppEnv) {
       webOrigin: config.WEB_ORIGIN,
       storage: createR2Storage(env.MEDIA),
       videoUploads: createVideoUploads(db, stream, jobs),
+      videoJobs: jobs,
       rateLimiter: createDistributedRateLimiter(env.API_COUNTERS),
       appealToken: createAppealTokenSigner(config.APPEAL_TOKEN_SECRET),
       emailSender: { send: sendEmail },

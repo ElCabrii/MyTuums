@@ -74,6 +74,60 @@ export const NOTIFICATION_PAGE_SIZE_MAX = 50;
  */
 export const MESSAGE_BODY_MAX_LENGTH = 2000;
 
+/**
+ * Message attachments share the post images' caps exactly (issue #408): a DM
+ * carries up to four images under the same per-file and batch budgets, or one
+ * voice note, or one Stream video. One message holds at most one media GROUP
+ * — images, or a voice note, or a video — so the largest legitimate RPC body
+ * stays inside `RPC_MAX_BODY_BYTES`'s derivation below.
+ */
+export const MESSAGE_IMAGE_MAX_COUNT = POST_ATTACHMENT_MAX_COUNT;
+export const MESSAGE_IMAGE_MAX_BYTES = POST_ATTACHMENT_MAX_BYTES;
+export const MESSAGE_IMAGE_MAX_TOTAL_BYTES = POST_ATTACHMENT_MAX_TOTAL_BYTES;
+
+/**
+ * What a voice note may weigh and run for. MediaRecorder produces low-bitrate
+ * Opus/AAC, so a 10 MiB cap bounds an honest recording far above any real
+ * note while bounding a hostile one; the duration cap is what the composer
+ * enforces while recording, and the byte cap is the server's real boundary
+ * (audio duration is not cheaply verifiable server-side, so it is stored as
+ * the client's declared measurement — like a video's accepted byte size).
+ */
+export const MESSAGE_VOICE_MAX_BYTES = 10_000_000;
+export const MESSAGE_VOICE_MAX_DURATION_MS = 5 * 60 * 1000;
+
+/**
+ * The containers a voice note may arrive in — what `MediaRecorder` produces
+ * across the browser matrix (Chrome/Edge webm-opus, Safari mp4/AAC, Firefox
+ * ogg-opus) plus the two legacy containers the declared type may still name.
+ * The server sniffs actual bytes and never trusts this list alone; it bounds
+ * what a client may DECLARE so a hostile type cannot even reach the sniffer.
+ */
+export const MESSAGE_VOICE_INPUT_TYPES = [
+  "audio/webm",
+  "audio/mp4",
+  "audio/ogg",
+  "audio/mpeg",
+  "audio/aac",
+  "audio/wav",
+] as const;
+
+export type MessageVoiceInputType = (typeof MESSAGE_VOICE_INPUT_TYPES)[number];
+
+/**
+ * The audio content types `/media/` may serve back. Voice notes are the only
+ * non-image bytes this route delivers; the list is closed on purpose — a new
+ * stored format extends it here and in the storage validator together.
+ */
+export const SERVED_AUDIO_TYPES = [
+  "audio/webm",
+  "audio/mp4",
+  "audio/ogg",
+  "audio/mpeg",
+  "audio/aac",
+  "audio/wav",
+] as const;
+
 /** Default and maximum page sizes for the message lists and thread walks. */
 export const MESSAGE_PAGE_SIZE = 20;
 export const MESSAGE_PAGE_SIZE_MAX = 50;
@@ -562,6 +616,10 @@ export const GAME_PLATFORMS_MAX = 10;
 export const RPC_MAX_BODY_BYTES =
   Math.max(
     POST_ATTACHMENT_MAX_TOTAL_BYTES,
+    // One message carries at most one media group: the image batch, or one
+    // voice note. Either alone must clear the ceiling.
+    MESSAGE_IMAGE_MAX_TOTAL_BYTES,
+    MESSAGE_VOICE_MAX_BYTES,
     ...Object.values(IMAGE_LIMITS).map((slot) => slot.maxOriginalBytes + slot.maxDisplayBytes),
   ) +
   1024 * 1024;

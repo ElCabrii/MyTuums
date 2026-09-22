@@ -4,7 +4,18 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { getLocale } from "@/paraglide/runtime.js";
 import { toast } from "sonner";
-import { ArrowLeft, EyeOff, Flag, MoreHorizontal, Send, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  EyeOff,
+  Flag,
+  Loader2,
+  Mic,
+  MoreHorizontal,
+  Send,
+  Square,
+  Trash2,
+  X,
+} from "lucide-react";
 import {
   conversationWithFamily,
   deleteMessageAtom,
@@ -15,10 +26,18 @@ import {
   seedFirstMessageThread,
   sendMessageAtom,
   setMessageDraft,
+  type PendingMedia,
 } from "@/atoms/messages";
 import type { ThreadItem } from "@/atoms/messages";
+import {
+  clearVideoDraft,
+  selectVideoAtomFamily,
+  videoDraftAtomFamily,
+  type VideoSelectionVerdict,
+} from "@/atoms/video-upload";
 import { viewerIdAtom } from "@/atoms/session";
 import { reportDialogAtom } from "@/atoms/dialog-targets";
+import type { ComposerAttachment } from "@/atoms/composer";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -29,12 +48,40 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ComposerMediaDialog } from "@/components/composer-media-dialog";
+import { ComposerVideo } from "@/components/composer-video";
+import {
+  MessageAttachments,
+  VoiceBubble,
+  TERMINAL_VIDEO_STATES,
+} from "@/components/message-attachments";
 import { LinkedText } from "@/components/linked-text";
 import { formatRelativeTime } from "@/lib/format";
 import { handleOf } from "@/lib/user";
+import { createPostAttachment } from "@/lib/media";
+import {
+  createVoiceRecorder,
+  formatVoiceDuration,
+  voiceRecordingSupported,
+  type VoiceRecorderHandle,
+  type RecordedVoice,
+} from "@/lib/voice-recorder";
+import { preflightVideo, type VideoPreflightRejection } from "@/lib/video-preflight";
+import { acceptPostImage } from "@my-tuums/api/post-image";
+import {
+  MESSAGE_BODY_MAX_LENGTH,
+  MESSAGE_IMAGE_MAX_BYTES,
+  MESSAGE_IMAGE_MAX_COUNT,
+  MESSAGE_IMAGE_MAX_TOTAL_BYTES,
+  MESSAGE_VOICE_MAX_DURATION_MS,
+  VIDEO_MAX_BYTES,
+  VIDEO_MAX_DURATION_SECONDS,
+  VIDEO_MAX_FPS,
+  VIDEO_MAX_LONG_EDGE,
+  VIDEO_MAX_SHORT_EDGE,
+} from "@my-tuums/api/constants";
 import type { ConversationItem } from "@/lib/orpc";
 import { m } from "@/paraglide/messages.js";
-import { MESSAGE_BODY_MAX_LENGTH } from "@my-tuums/api/constants";
 
 /**
  * One open conversation (issue #408): bubbles oldest-to-newest, safe
@@ -63,6 +110,26 @@ export function MessageThreadPane({ conversationId }: { conversationId: string }
   const handle = handleOf(other);
   const displayName = other?.name || handle || m.user_unknown();
   const lastReadAt = header?.lastReadAt ?? null;
+
+  // A video attachment the workflow is still processing keeps the thread
+  // polling until its state turns terminal: D1 is the source of truth, the
+  // SSE push tells this client about OTHER events, and the refetch is what
+  // flips the processing bubble into the player (a missed poll loses
+  // nothing — the next one, or a focus refetch, lands the same state).
+  const processingVideo = messages.some(
+    (item) =>
+      item.deletedAt === null &&
+      (item.attachments ?? []).some(
+        (attachment) =>
+          attachment.video !== null && !TERMINAL_VIDEO_STATES.has(attachment.video.state),
+      ),
+  );
+  const refetchThread = thread.refetch;
+  useEffect(() => {
+    if (!processingVideo) return;
+    const timer = setInterval(() => void refetchThread(), 4000);
+    return () => clearInterval(timer);
+  }, [processingVideo, refetchThread]);
 
   // "Open and displayed means read" — but only while the document is
   // foregrounded and only through the newest message actually on screen (the
@@ -144,7 +211,7 @@ export function MessageThreadPane({ conversationId }: { conversationId: string }
         onLoadMore={() => void thread.fetchNextPage()}
         viewerId={viewerId ?? ""}
       />
-      <Composer conversationId={conversationId} recipientId={other?.id ?? ""} />
+      <Composer key={other?.id} conversationId={conversationId} recipientId={other?.id ?? ""} />
     </div>
   );
 }
@@ -242,11 +309,20 @@ function ThreadHeader({
   );
 }
 
-/**
- * The scroll surface: older pages load at the top, new messages arrive at
- * the bottom, and the pane pins to the newest message unless the reader has
- * scrolled up into history.
- */
+/** What an optimistic row shows while its media group is in flight. */
+function PendingMediaChip({ pendingMedia }: { pendingMedia: PendingMedia }) {
+  return (
+    <span className="text-muted-foreground/80 flex items-center gap-1.5 text-xs italic">
+      <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+      {pendingMedia.kind === "images"
+        ? `${m.messages_preview_photo()} ×${pendingMedia.count}`
+        : pendingMedia.kind === "voice"
+          ? m.messages_preview_voice()
+          : m.messages_preview_video()}
+    </span>
+  );
+}
+
 function MessageScroll({
   items,
   hasNextPage,
@@ -306,11 +382,20 @@ function MessageScroll({
                     : "bg-muted text-foreground rounded-bl-sm"
                 }`}
               >
-                {item.decryptionFailed ? (
-                  <p role="alert">{m.messages_decryption_error()}</p>
+                {item.pending && item.pendingMedia ? (
+                  <PendingMediaChip pendingMedia={item.pendingMedia} />
                 ) : (
-                  <LinkedText text={item.body ?? ""} />
+                  <MessageAttachments attachments={item.attachments ?? []} mine={mine} />
                 )}
+                {(item.body ?? "").length > 0 && (
+                  <>
+                    {item.attachments && item.attachments.length > 0 && !item.pending && (
+                      <div className="pt-1" />
+                    )}
+                    <LinkedText text={item.body ?? ""} />
+                  </>
+                )}
+                {item.decryptionFailed && <p role="alert">{m.messages_decryption_error()}</p>}
                 {!item.envelope && !item.pending && (
                   <p className="text-xs opacity-70">{m.messages_legacy_notice()}</p>
                 )}
@@ -400,7 +485,29 @@ function ReportMessageAction({
   );
 }
 
-/** Enter sends, Shift+Enter breaks a line, and an IME composition never sends. */
+/**
+ * Reads selected bytes through the browser's FileReader contract (jsdom
+ * included) so the shared image acceptance can sniff what the user picked.
+ */
+function readFileBytes(file: File): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (reader.result instanceof ArrayBuffer) resolve(new Uint8Array(reader.result));
+      else reject(new Error("Unable to read the selected image."));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Unable to read the selected image."));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+/**
+ * The message composer: Enter sends, and the one media GROUP a message may
+ * carry is chosen here — up to four images through the shared picker and
+ * re-encode pipeline, one video through the shared Stream upload state, or
+ * one recorded voice note. Media state is transient (the text draft is the
+ * only persisted one), keyed by recipient via the component's recipientId.
+ */
 function Composer({
   recipientId,
   conversationId,
@@ -412,32 +519,219 @@ function Composer({
   /** The recipient's summary — lets a first contact seed the new thread. */
   seedUser?: ConversationItem["user"] | null;
 }) {
-  // Initialized from the per-recipient draft store so text typed around the
-  // first-send transition (the pane remounts when the URL changes) or while
-  // away from a conversation is still here on the next mount.
   const [draft, setDraft] = useState(() => messageDraftFor(recipientId));
   const send = useAtomValue(sendMessageAtom);
   const navigate = useNavigate();
   const queryClient = useAtomValue(queryClientAtom);
+
+  // Images: the same ComposerAttachment objects and re-encode pipeline the
+  // post composer runs, so EXIF stripping and byte caps behave identically.
+  const [images, setImages] = useState<ComposerAttachment[]>([]);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [validating, setValidating] = useState(false);
+  const imageSelectionRef = useRef(0);
+
+  // Video: the post composer's upload atoms, scoped to THIS recipient so two
+  // drafts never share state. The draft survives remounts of the pane.
+  const videoScope = `message:${recipientId}`;
+  const videoDraft = useAtomValue(videoDraftAtomFamily(videoScope));
+  const selectVideo = useSetAtom(selectVideoAtomFamily(videoScope));
+  const videoReady = videoDraft?.status === "uploaded" && Boolean(videoDraft.videoId);
+
+  // Voice: transient recording state; the finished note waits in a draft
+  // chip until send or removal.
+  const [recording, setRecording] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [voiceDraft, setVoiceDraft] = useState<RecordedVoice | null>(null);
+  const recorderRef = useRef<VoiceRecorderHandle | null>(null);
+  useEffect(
+    () => () => {
+      imageSelectionRef.current += 1;
+      recorderRef.current?.cancel();
+    },
+    [],
+  );
+
+  const videoRejectionMessage = (reason: VideoPreflightRejection): string => {
+    switch (reason) {
+      case "size":
+        return m.video_reject_size({ maxMb: String(VIDEO_MAX_BYTES / 1_000_000) });
+      case "type":
+        return m.video_reject_type();
+      case "duration":
+        return m.video_reject_duration({ maxMinutes: String(VIDEO_MAX_DURATION_SECONDS / 60) });
+      case "dimensions":
+        return m.video_reject_dimensions({
+          longEdge: String(VIDEO_MAX_LONG_EDGE),
+          shortEdge: String(VIDEO_MAX_SHORT_EDGE),
+        });
+      case "frameRate":
+        return m.video_reject_frame_rate({ maxFps: String(VIDEO_MAX_FPS) });
+      case "unreadable":
+        return m.video_reject_unreadable();
+    }
+  };
 
   const editDraft = (body: string) => {
     setDraft(body);
     setMessageDraft(recipientId, body);
   };
 
+  const startRecording = async () => {
+    if (recorderRef.current || recording) return;
+    const handle = createVoiceRecorder({
+      maxDurationMs: MESSAGE_VOICE_MAX_DURATION_MS,
+      onEvent: (event) => {
+        switch (event.kind) {
+          case "recording":
+            setRecording(true);
+            setElapsedMs(0);
+            break;
+          case "tick":
+            setElapsedMs(event.elapsedMs);
+            break;
+          case "stopped":
+            setRecording(false);
+            recorderRef.current = null;
+            setVoiceDraft(event.voice);
+            break;
+          case "cancelled":
+            setRecording(false);
+            recorderRef.current = null;
+            break;
+          case "failed":
+            setRecording(false);
+            recorderRef.current = null;
+            toast.error(
+              event.reason === "unsupported"
+                ? m.messages_voice_unsupported()
+                : m.messages_voice_failed(),
+            );
+            break;
+        }
+      },
+    });
+    recorderRef.current = handle;
+    setRecording(true);
+    await handle.start();
+  };
+
+  const stopRecording = () => {
+    // `stopped` clears the ref; cancel keeps the same shape.
+    recorderRef.current?.stop();
+  };
+
+  const cancelRecording = () => {
+    recorderRef.current?.cancel();
+    recorderRef.current = null;
+    setRecording(false);
+  };
+
+  const removeVoiceDraft = () => {
+    setVoiceDraft(null);
+  };
+
+  const handleMediaSelection = async (files: File[]) => {
+    if (validating || recording || voiceDraft) return;
+    const video = files.find((file) => file.type.startsWith("video/"));
+    if (video) {
+      if (files.length !== 1 || images.length > 0 || videoDraft) {
+        setMediaError(m.post_media_hint());
+        return;
+      }
+      setMediaError(null);
+      setValidating(true);
+      let verdict: VideoSelectionVerdict;
+      try {
+        verdict = await selectVideo(video, preflightVideo);
+      } finally {
+        setValidating(false);
+      }
+      setMediaError(verdict.accepted ? null : videoRejectionMessage(verdict.reason));
+      return;
+    }
+    if (videoDraft) {
+      setMediaError(m.post_media_hint());
+      return;
+    }
+    const selectionId = imageSelectionRef.current + 1;
+    imageSelectionRef.current = selectionId;
+    setMediaError(null);
+    setValidating(true);
+    const next = [...images];
+    let totalBytes = next.reduce((sum, attachment) => sum + attachment.file.size, 0);
+    let nextError: string | null = null;
+    for (const file of files) {
+      if (file.size <= 0 || file.size > MESSAGE_IMAGE_MAX_BYTES) {
+        nextError ??= m.post_image_invalid();
+        continue;
+      }
+      if (next.length >= MESSAGE_IMAGE_MAX_COUNT) {
+        nextError = m.post_image_limit();
+        break;
+      }
+      let accepted: boolean;
+      try {
+        accepted = acceptPostImage(await readFileBytes(file), file.type).ok;
+      } catch {
+        accepted = false;
+      }
+      if (!accepted) {
+        nextError ??= m.post_image_invalid();
+        continue;
+      }
+      let processed: File;
+      try {
+        processed = await createPostAttachment(file);
+      } catch {
+        nextError ??= m.post_image_invalid();
+        continue;
+      }
+      if (totalBytes + processed.size > MESSAGE_IMAGE_MAX_TOTAL_BYTES) {
+        nextError = m.post_image_limit();
+        break;
+      }
+      next.push({ id: crypto.randomUUID(), file: processed });
+      totalBytes += processed.size;
+    }
+    if (selectionId !== imageSelectionRef.current) return;
+    if (nextError) setMediaError(nextError);
+    setImages(next);
+    setValidating(false);
+  };
+
+  const hasMedia = images.length > 0 || voiceDraft !== null || videoReady;
+  const canSubmit =
+    (draft.trim().length > 0 || hasMedia) &&
+    !send.isPending &&
+    !validating &&
+    !recording &&
+    (!videoDraft || videoReady);
+
+  const clearMedia = () => {
+    setImages([]);
+    removeVoiceDraft();
+    clearVideoDraft(videoScope);
+    setMediaError(null);
+  };
+
   const submit = () => {
     const body = draft.trim();
-    if (!body || send.isPending) return;
-    setDraft("");
-    setMessageDraft(recipientId, "");
+    if (!canSubmit || (!body && !hasMedia)) return;
+    editDraft("");
     send.mutate(
-      { recipientId, body, conversationId },
+      {
+        recipientId,
+        body,
+        conversationId,
+        images: images.length > 0 ? images.map((attachment) => attachment.file) : undefined,
+        voice: voiceDraft?.file,
+        voiceDurationMs: voiceDraft?.durationMs,
+        videoId: videoReady && videoDraft?.videoId ? videoDraft.videoId : undefined,
+      },
       {
         onSuccess: (message) => {
-          // First contact: the conversation id arrives with the message.
-          // Seed the thread's cache so the route renders the sent message
-          // the moment the URL changes — no skeleton round-trip — then move
-          // there so refresh and history work.
+          clearMedia();
           if (!conversationId) {
             if (seedUser) {
               seedFirstMessageThread(queryClient, message.conversationId, seedUser, message);
@@ -467,10 +761,111 @@ function Composer({
     // the pane to the visible area, so the composer sits above the mobile
     // tab bar by construction — nothing scrolls under it.
     <footer className="border-border bg-background border-t p-3">
+      {images.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {images.map((attachment) => (
+            <MessageImageDraft
+              key={attachment.id}
+              attachment={attachment}
+              disabled={send.isPending}
+              onRemove={() =>
+                setImages((current) => current.filter((item) => item.id !== attachment.id))
+              }
+            />
+          ))}
+        </div>
+      )}
+      {voiceDraft && (
+        <div className="bg-muted/30 mb-2 flex items-center gap-2 rounded-lg p-2">
+          <VoiceBubble file={voiceDraft.file} durationMs={voiceDraft.durationMs} mine={false} />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={m.messages_voice_remove()}
+            disabled={send.isPending}
+            onClick={removeVoiceDraft}
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        </div>
+      )}
+      {videoDraft && <ComposerVideo scope={videoScope} disabled={send.isPending} />}
+      {recording && (
+        <div
+          className="bg-destructive/10 border-destructive/20 text-destructive mb-2 flex items-center gap-2 rounded-lg border p-2 text-sm"
+          role="status"
+        >
+          <span
+            className="bg-destructive size-2 shrink-0 animate-pulse rounded-full"
+            aria-hidden="true"
+          />
+          <span className="flex-1 tabular-nums">{formatVoiceDuration(elapsedMs)}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={cancelRecording}
+            aria-label={m.messages_voice_cancel()}
+          >
+            {m.messages_voice_cancel()}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={stopRecording}
+            aria-label={m.messages_voice_stop()}
+          >
+            <Square className="size-3.5" aria-hidden="true" />
+            {m.messages_voice_stop()}
+          </Button>
+        </div>
+      )}
+      {mediaError && (
+        <div
+          role="alert"
+          className="bg-destructive/10 border-destructive/20 text-destructive mb-2 flex items-start gap-2 rounded-lg border p-2.5 text-xs"
+        >
+          <span>{mediaError}</span>
+        </div>
+      )}
       <div className="border-border focus-within:border-primary/50 flex items-end gap-2 rounded-2xl border p-2">
+        <div className="flex items-center gap-1">
+          <ComposerMediaDialog
+            disabled={
+              send.isPending ||
+              recording ||
+              validating ||
+              Boolean(videoDraft) ||
+              voiceDraft !== null ||
+              images.length >= MESSAGE_IMAGE_MAX_COUNT
+            }
+            description={m.messages_media_hint()}
+            hints={[
+              m.messages_media_hint(),
+              m.messages_voice_too_long({ minutes: String(MESSAGE_VOICE_MAX_DURATION_MS / 60000) }),
+            ]}
+            onSelect={(files) => void handleMediaSelection(files)}
+          />
+          {voiceRecordingSupported() && !voiceDraft && !videoDraft && images.length === 0 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground rounded-full"
+              aria-label={m.messages_voice_record()}
+              title={m.messages_voice_record()}
+              disabled={send.isPending || validating || recording}
+              onClick={() => void startRecording()}
+            >
+              <Mic className="size-4" aria-hidden="true" />
+            </Button>
+          )}
+        </div>
         <textarea
           value={draft}
           rows={1}
+          disabled={send.isPending}
           maxLength={MESSAGE_BODY_MAX_LENGTH}
           onChange={(event) => editDraft(event.target.value)}
           onKeyDown={(event) => {
@@ -483,19 +878,57 @@ function Composer({
           }}
           placeholder={m.messages_composer_placeholder()}
           aria-label={m.messages_composer_placeholder()}
-          className="max-h-32 min-h-9 flex-1 resize-none bg-transparent px-2 text-sm outline-none"
+          className="max-h-32 min-h-9 min-w-0 flex-1 resize-none bg-transparent px-2 text-sm outline-none"
         />
         <Button
           size="icon"
           className="rounded-full"
           aria-label={m.messages_send()}
-          disabled={!draft.trim() || send.isPending}
+          disabled={!canSubmit}
           onClick={submit}
         >
-          <Send className="h-4 w-4" aria-hidden="true" />
+          {send.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <Send className="h-4 w-4" aria-hidden="true" />
+          )}
         </Button>
       </div>
     </footer>
+  );
+}
+
+/** Owns the preview URL for exactly one mounted image selection. */
+function MessageImageDraft({
+  attachment,
+  disabled,
+  onRemove,
+}: {
+  attachment: ComposerAttachment;
+  disabled: boolean;
+  onRemove: () => void;
+}) {
+  const imageRef = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    const url = URL.createObjectURL(attachment.file);
+    if (imageRef.current) imageRef.current.src = url;
+    return () => URL.revokeObjectURL(url);
+  }, [attachment.file]);
+  return (
+    <div className="relative">
+      <img ref={imageRef} alt={attachment.file.name} className="size-16 rounded-lg object-cover" />
+      <Button
+        type="button"
+        size="icon-xs"
+        variant="secondary"
+        aria-label={m.messages_attachment_remove()}
+        disabled={disabled}
+        onClick={onRemove}
+        className="absolute -top-1.5 -right-1.5 rounded-full"
+      >
+        <X className="size-3" />
+      </Button>
+    </div>
   );
 }
 

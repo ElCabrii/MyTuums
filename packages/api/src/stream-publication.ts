@@ -1,6 +1,13 @@
 import type { Database } from "@my-tuums/db";
-import { post, user, video, videoSubmission, type StreamPlayback } from "@my-tuums/db/schema";
-import { and, eq, isNotNull, isNull, not, sql } from "drizzle-orm";
+import {
+  messageAttachment,
+  post,
+  user,
+  video,
+  videoSubmission,
+  type StreamPlayback,
+} from "@my-tuums/db/schema";
+import { and, eq, isNotNull, isNull, not, sql, type SQLWrapper } from "drizzle-orm";
 import { z } from "zod";
 import { VIDEO_MAX_DURATION_SECONDS } from "./constants.js";
 import { postPublicationStatements, postTargetSelection } from "./post-publication.js";
@@ -13,6 +20,11 @@ const playbackSchema = z.object({
   duration: z.number().positive().max(VIDEO_MAX_DURATION_SECONDS),
   captionLanguage: z.string().min(1).nullable(),
 });
+
+/** Whether this video's processing outcome belongs to a message (vs a post). */
+function hasMessageAttachment(videoId: string | SQLWrapper) {
+  return sql`exists (select 1 from ${messageAttachment} where ${messageAttachment.videoId} = ${videoId})`;
+}
 
 /** Only authenticated, ready Stream metadata enters this boundary. */
 export async function recordStreamReady(
@@ -32,7 +44,11 @@ export async function recordStreamReady(
         isNotNull(video.authorId),
         sql`${video.state} in ('queued', 'processing')`,
         sql`${video.expiresAt} > cast(unixepoch('subsec') * 1000 as integer)`,
-        sql`exists (select 1 from ${videoSubmission} where ${videoSubmission.videoId} = ${id})`,
+        // A destination must still exist: a post submission, or a message
+        // attachment (issue #408). An orphaned processing row has nowhere to
+        // publish and stays unready for expiry to fail.
+        sql`(exists (select 1 from ${videoSubmission} where ${videoSubmission.videoId} = ${id})
+          or ${hasMessageAttachment(id)})`,
       ),
     )
     .returning({ id: video.id });
@@ -131,5 +147,31 @@ export async function publishStreamVideo(db: Database, id: string) {
       ),
   ]);
   if (!changed.length) await failStreamVideo(db, id);
+  return changed.length === 1;
+}
+
+/**
+ * The message-shaped twin of `publishStreamVideo` (issue #408): the message
+ * row already exists — it was sent while the video was still processing — so
+ * publication is only the video's own terminal state. The thread projection
+ * reads the stored playback from the video row, and clients learn the change
+ * by refetching (the open thread polls while an attachment is processing; a
+ * missed poll loses nothing). Duplicate delivery sees the committed state and
+ * cannot re-publish; an expired `ready` row stays for the expiry pass to
+ * fail, exactly like the post path.
+ */
+export async function publishMessageVideo(db: Database, id: string) {
+  const changed = await db
+    .update(video)
+    .set({ state: "published", uploadUrl: null })
+    .where(
+      and(
+        eq(video.id, id),
+        eq(video.state, "ready"),
+        sql`${video.expiresAt} > cast(unixepoch('subsec') * 1000 as integer)`,
+        hasMessageAttachment(id),
+      ),
+    )
+    .returning({ id: video.id });
   return changed.length === 1;
 }

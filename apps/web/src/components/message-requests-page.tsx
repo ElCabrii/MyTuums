@@ -1,3 +1,4 @@
+import { messagePreview } from "@/lib/message-preview";
 import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { getLocale } from "@/paraglide/runtime.js";
@@ -96,13 +97,7 @@ function RequestRow({ item }: { item: MessageRequestItem }) {
           <span className="text-muted-foreground shrink-0 text-xs">{when}</span>
         </div>
         <p className="text-muted-foreground mt-1 line-clamp-2 text-sm">
-          {item.lastMessage === null
-            ? m.messages_empty_preview()
-            : item.lastMessage.encrypted
-              ? m.messages_encrypted_preview()
-              : item.lastMessage.body === null
-                ? m.messages_tombstone()
-                : item.lastMessage.body}
+          {messagePreview(item.lastMessage)}
         </p>
         <div className="mt-3 flex gap-2">
           <Button

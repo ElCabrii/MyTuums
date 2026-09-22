@@ -1,6 +1,6 @@
 # Recoverable message encryption
 
-New message bodies are encrypted in the sender's browser and decrypted in the
+New message text bodies are encrypted in the sender's browser and decrypted in the
 participants' browsers. **This is not provider-inaccessible end-to-end encryption.**
 The chosen recovery policy lets a signed-in user recover history using their
 verified email, without a separate passphrase, recovery key or existing device.
@@ -69,6 +69,11 @@ can obtain the same history; provider access also remains trusted.
 
 ## Limits and evidence disclosure
 
+Image, voice and video attachments retain the existing server-managed media
+pipeline. Their bytes are not encrypted in the browser: the service and storage
+providers can access them. Participant authorization and report-scoped moderator
+access still apply. Message signatures bind the text, not attachment bytes.
+
 This version uses stable account keys, not a ratcheting protocol. It has **no
 forward secrecy, post-compromise recovery, post-quantum protection, per-device
 key revocation or user-verifiable key transparency**. Compromise of an account
@@ -79,8 +84,8 @@ payload, malicious extension or compromised browser. Web delivery also trusts
 the origin to serve honest JavaScript. TLS, authentication, CSP and authorization
 remain necessary.
 
-Encrypted-message reports deliberately disclose only the selected signed
-plaintext to moderation. The server verifies sender signature, message ID and
+Encrypted-message reports deliberately disclose the selected signed
+plaintext and that message’s attachments to moderation. The server verifies sender signature, message ID and
 recipient before storing the report snapshot. The report dialog explains this
 disclosure. Moderators have no conversation-browsing endpoint. Already disclosed
 reports remain plaintext evidence after message deletion. The UI cannot report
@@ -89,8 +94,8 @@ an encrypted tombstone whose plaintext is no longer available to that browser.
 Existing message rows remain legacy plaintext and are labeled accordingly.
 They are not retroactively encrypted, and existing database backups cannot be
 made private retroactively. Legacy reports retain the bounded legacy context
-window. Migration 0008 adds identities, challenges and envelope storage;
-0009 forbids new plaintext inserts and content mutation while allowing
+window. Migration 0011 adds identities, challenges and envelope storage;
+0012 forbids new plaintext inserts and content mutation while allowing
 existing rows to be read and tombstoned. D1 operators can still alter data;
 these triggers protect application rollout and rollback, not a hostile operator.
 
@@ -109,7 +114,7 @@ Never use that fixture key in a hosted environment.
    workflow. Never commit it, place it in Wrangler vars or expose it to the SPA.
    The shape is `{ "active": "key-id", "keys": { "key-id": <private P-256 JWK> } }`.
 3. Apply committed D1 migrations through the normal pre-deploy workflow and
-   deploy the matching Worker and SPA together. After 0009, older Workers
+   deploy the matching Worker and SPA together. After 0012, older Workers
    cannot send messages; do not remove the guard to make a rollback work.
 4. Verify registration, delivery in two browsers and recovery from captured
    test email in preview before enabling production. No hosted rollout has

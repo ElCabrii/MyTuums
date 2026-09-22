@@ -13,14 +13,21 @@ import { and, eq } from "drizzle-orm";
 import {
   conversation,
   conversationParticipant,
+  jobIntent,
+  messageAttachment,
+  videoCleanup,
   message as messageTable,
   messageIdentity,
   user as userTable,
   moderationAction,
   report,
+  video as videoTable,
 } from "@my-tuums/db/schema";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Context } from "./context.js";
+import { cleanStreamUploads } from "./stream-cleanup.js";
+import { failStreamVideo } from "./stream-processing.js";
+import { canViewMessageMedia } from "./message-media.js";
 import { parseMessageReportSnapshot } from "./message-report.js";
 import { appRouter } from "./router.js";
 import {
@@ -30,6 +37,7 @@ import {
   recordedMessageEvents,
   setUserBan,
   setUserRole,
+  testStorageObjects,
   truncateAll,
   type TestUser,
 } from "./testing/harness.js";
@@ -1174,4 +1182,482 @@ describe("the push layer is strictly best-effort", () => {
     );
     expect(await readBody(thread.items[0])).toBe("delivered anyway");
   });
+});
+
+async function sendMedia(
+  input: {
+    recipientId: string;
+    body?: string;
+    images?: File[];
+    voice?: File;
+    voiceDurationMs?: number;
+    videoId?: string;
+  },
+  { context }: { context: Context },
+) {
+  const { body = "", ...media } = input;
+  return call(
+    appRouter.message.send,
+    { ...media, ...(await sendInput(context, input.recipientId, body)) },
+    { context },
+  );
+}
+
+describe("message media attachments", () => {
+  /** A genuine 2x2 PNG, the same fixture the post-attachment suites use. */
+  const MESSAGE_PNG = new Uint8Array(
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAEElEQVR4nGP4y8AARAwQCgAfrgP19hgqWQAAAABJRU5ErkJggg==",
+      "base64",
+    ),
+  );
+
+  const pngFile = (name = "photo.png"): File =>
+    new File([MESSAGE_PNG], name, { type: "image/png" });
+
+  /** A minimal but genuinely EBML-tagged WebM header, as MediaRecorder emits. */
+  const WEBM_BYTES = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x01, 0x02, 0x03, 0x04]);
+  const voiceFile = (name = "note.webm", type = "audio/webm"): File =>
+    new File([WEBM_BYTES], name, { type });
+
+  it("sends an image group with a caption: rows, objects, and the thread projection agree", async () => {
+    const sender = await createTestUser();
+    const recipient = await createTestUser();
+    await call(appRouter.user.follow, { userId: sender.id }, { context: contextFor(recipient) });
+    const sent = await sendMedia(
+      { recipientId: recipient.id, body: "two photos", images: [pngFile(), pngFile("b.png")] },
+      { context: contextFor(sender) },
+    );
+    expect(sent.attachments).toHaveLength(2);
+    for (const attachment of sent.attachments) {
+      expect(attachment.kind).toBe("image");
+      expect(attachment.url).toMatch(/^\/media\/messages\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.png$/);
+      expect(attachment.width).toBe(2);
+      expect(attachment.height).toBe(2);
+    }
+    // The objects exist under the projected paths.
+    for (const attachment of sent.attachments) {
+      expect(testStorageObjects.has(attachment.url.slice("/media/".length))).toBe(true);
+    }
+
+    const thread = await call(
+      appRouter.message.thread,
+      { conversationId: sent.conversationId },
+      { context: contextFor(recipient) },
+    );
+    expect(thread.items[0].attachments).toHaveLength(2);
+    expect(thread.items[0].attachments[0].position).toBe(0);
+    expect(thread.items[0].attachments[1].position).toBe(1);
+
+    // Encrypted captions stay out of server previews.
+    const inbox = await call(
+      appRouter.message.conversations,
+      {},
+      { context: contextFor(recipient) },
+    );
+    const row = inbox.items.find((item) => item.conversationId === sent.conversationId);
+    expect(row?.lastMessage?.body).toBeNull();
+    expect(row?.lastMessage?.encrypted).toBe(true);
+    expect(await readBody(thread.items[0])).toBe("two photos");
+    // Attachment kind remains visible metadata.
+    expect(row?.lastMessage?.mediaKind).toBe("image");
+  });
+
+  it("sends a media-only message with an encrypted empty caption and visible media metadata", async () => {
+    const sender = await createTestUser();
+    const recipient = await createTestUser();
+    await call(appRouter.user.follow, { userId: sender.id }, { context: contextFor(recipient) });
+    const sent = await sendMedia(
+      { recipientId: recipient.id, images: [pngFile()] },
+      { context: contextFor(sender) },
+    );
+    expect(await readBody(sent)).toBe("");
+
+    const inbox = await call(
+      appRouter.message.conversations,
+      {},
+      { context: contextFor(recipient) },
+    );
+    const row = inbox.items.find((item) => item.conversationId === sent.conversationId);
+    expect(row?.lastMessage?.body).toBeNull();
+    expect(row?.lastMessage?.mediaKind).toBe("image");
+  });
+
+  it("refuses image uploads that are not images, writing nothing anywhere", async () => {
+    const sender = await createTestUser();
+    const recipient = await createTestUser();
+    await call(appRouter.user.follow, { userId: sender.id }, { context: contextFor(recipient) });
+    const objectsBefore = testStorageObjects.size;
+    await expect(
+      sendMedia(
+        {
+          recipientId: recipient.id,
+          images: [new File(["definitely not a png"], "x.png", { type: "image/png" })],
+        },
+        { context: contextFor(sender) },
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    // The refused send leaves no conversation for the pair — and therefore no
+    // participants or messages of its own — and no object.
+    expect((await pairRowCounts(contextFor(sender), sender.id, recipient.id)).conversations).toBe(
+      0,
+    );
+    expect(testStorageObjects.size).toBe(objectsBefore);
+  });
+
+  it("refuses mixing media kinds in one message", async () => {
+    const sender = await createTestUser();
+    const recipient = await createTestUser();
+    await expect(
+      sendMedia(
+        {
+          recipientId: recipient.id,
+          images: [pngFile()],
+          voice: voiceFile(),
+          voiceDurationMs: 1500,
+        },
+        { context: contextFor(sender) },
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("refuses a voice and an uploaded video in the same message", async () => {
+    const sender = await createTestUser();
+    const recipient = await createTestUser();
+    const videoId = crypto.randomUUID();
+    await sender.context.db.insert(videoTable).values({
+      id: videoId,
+      authorId: sender.id,
+      state: "uploaded",
+      byteSize: 100,
+      streamCreatorId: `mytuums-test:${videoId}`,
+      expiresAt: new Date(Date.now() + 3_600_000),
+    });
+    await expect(
+      sendMedia(
+        {
+          recipientId: recipient.id,
+          voice: voiceFile(),
+          voiceDurationMs: 1500,
+          videoId,
+        },
+        { context: contextFor(sender) },
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect((await pairRowCounts(contextFor(sender), sender.id, recipient.id)).conversations).toBe(
+      0,
+    );
+  });
+
+  it("sends a voice note: sniffed type wins, duration is the caller's declared measurement", async () => {
+    const sender = await createTestUser();
+    const recipient = await createTestUser();
+    await call(appRouter.user.follow, { userId: sender.id }, { context: contextFor(recipient) });
+    const sent = await sendMedia(
+      {
+        recipientId: recipient.id,
+        body: "listen",
+        voice: voiceFile(),
+        voiceDurationMs: 4200,
+      },
+      { context: contextFor(sender) },
+    );
+    expect(sent.attachments).toHaveLength(1);
+    expect(sent.attachments[0].kind).toBe("voice");
+    expect(sent.attachments[0].contentType).toBe("audio/webm");
+    expect(sent.attachments[0].durationMs).toBe(4200);
+    expect(sent.attachments[0].url.endsWith(".webm")).toBe(true);
+
+    const thread = await call(
+      appRouter.message.thread,
+      { conversationId: sent.conversationId },
+      { context: contextFor(recipient) },
+    );
+    expect(thread.items[0].attachments[0].durationMs).toBe(4200);
+  });
+
+  it("refuses a voice note that is not audio and one that misses its declared duration", async () => {
+    const sender = await createTestUser();
+    const recipient = await createTestUser();
+    await expect(
+      sendMedia(
+        {
+          recipientId: recipient.id,
+          voice: new File([MESSAGE_PNG], "fake.webm", { type: "audio/webm" }),
+          voiceDurationMs: 1000,
+        },
+        { context: contextFor(sender) },
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      sendMedia({ recipientId: recipient.id, voice: voiceFile() }, { context: contextFor(sender) }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("queues an uploaded video: the message lands now, the video flips to queued, and the job intent commits in the same batch", async () => {
+    const sender = await createTestUser();
+    const recipient = await createTestUser();
+    await call(appRouter.user.follow, { userId: sender.id }, { context: contextFor(recipient) });
+    const videoId = crypto.randomUUID();
+    await sender.context.db.insert(videoTable).values({
+      id: videoId,
+      authorId: sender.id,
+      state: "uploaded",
+      byteSize: 123_456,
+      streamCreatorId: `mytuums-test:${videoId}`,
+      expiresAt: new Date(Date.now() + 3_600_000),
+    });
+
+    const sent = await sendMedia(
+      { recipientId: recipient.id, body: "watch this", videoId },
+      { context: contextFor(sender) },
+    );
+    expect(sent.attachments).toHaveLength(1);
+    expect(sent.attachments[0].kind).toBe("video");
+    expect(sent.attachments[0].video?.state).toBe("queued");
+    expect(sent.attachments[0].url).toBe(`/media/videos/${videoId}/master.m3u8`);
+
+    const [row] = await sender.context.db
+      .select()
+      .from(videoTable)
+      .where(eq(videoTable.id, videoId));
+    expect(row.state).toBe("queued");
+    const [intent] = await sender.context.db
+      .select()
+      .from(jobIntent)
+      .where(eq(jobIntent.entityId, videoId));
+    expect(intent).toMatchObject({ id: `video-${videoId}`, kind: "video", entityId: videoId });
+
+    const thread = await call(
+      appRouter.message.thread,
+      { conversationId: sent.conversationId },
+      { context: contextFor(recipient) },
+    );
+    expect(thread.items[0].attachments[0].video?.state).toBe("queued");
+  });
+
+  it.each([false, true])(
+    "a video cancelled after pre-read leaves conversation state unchanged (hidden: %s)",
+    async (hidden) => {
+      const sender = await createTestUser();
+      const recipient = await createTestUser();
+      const context = contextFor(sender);
+      if (hidden) {
+        const sent = await send(context, recipient.id, "Earlier message");
+        await call(appRouter.message.hide, { conversationId: sent.conversationId }, { context });
+      }
+      const before = await pairRowCounts(context, sender.id, recipient.id);
+      const id = crypto.randomUUID();
+      await context.db.insert(videoTable).values({
+        id,
+        authorId: sender.id,
+        state: "uploaded",
+        byteSize: 100,
+        streamCreatorId: `mytuums-test:${id}`,
+        expiresAt: new Date(Date.now() + 3_600_000),
+      });
+      // Deterministically land cancellation between the courtesy read and the
+      // atomic send. The actual batch and all its writes still run against D1.
+      const batch = context.db.batch.bind(context.db);
+      const intercept = vi.spyOn(context.db, "batch").mockImplementationOnce(async (queries) => {
+        await context.db
+          .update(videoTable)
+          .set({ state: "cancelled" })
+          .where(eq(videoTable.id, id));
+        return batch(queries);
+      });
+      try {
+        await expect(
+          sendMedia({ recipientId: recipient.id, videoId: id }, { context }),
+        ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      } finally {
+        intercept.mockRestore();
+      }
+      expect(await pairRowCounts(context, sender.id, recipient.id)).toEqual(before);
+      const participants = await context.db
+        .select({ status: conversationParticipant.status })
+        .from(conversationParticipant)
+        .where(eq(conversationParticipant.userId, sender.id));
+      expect(participants).toEqual(hidden ? [{ status: "hidden" }] : []);
+    },
+  );
+
+  it("refuses a video the caller does not own or that Stream has not accepted fully", async () => {
+    const sender = await createTestUser();
+    const recipient = await createTestUser();
+    const other = await createTestUser();
+    const [foreignId, processingId] = [crypto.randomUUID(), crypto.randomUUID()];
+    await other.context.db.insert(videoTable).values({
+      id: foreignId,
+      authorId: other.id,
+      state: "uploaded",
+      byteSize: 1,
+      streamCreatorId: `mytuums-test:${foreignId}`,
+      expiresAt: new Date(Date.now() + 3_600_000),
+    });
+    await sender.context.db.insert(videoTable).values({
+      id: processingId,
+      authorId: sender.id,
+      state: "processing",
+      byteSize: 1,
+      streamCreatorId: `mytuums-test:${processingId}`,
+      expiresAt: new Date(Date.now() + 3_600_000),
+    });
+    await expect(
+      sendMedia({ recipientId: recipient.id, videoId: foreignId }, { context: contextFor(sender) }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      sendMedia(
+        { recipientId: recipient.id, videoId: processingId },
+        { context: contextFor(sender) },
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("hides a tombstoned message's attachments with its body in the thread", async () => {
+    const sender = await createTestUser();
+    const recipient = await createTestUser();
+    const sent = await sendMedia(
+      { recipientId: recipient.id, images: [pngFile()] },
+      { context: contextFor(sender) },
+    );
+    await call(
+      appRouter.message.deleteMessage,
+      { messageId: sent.id },
+      { context: contextFor(sender) },
+    );
+    const thread = await call(
+      appRouter.message.thread,
+      { conversationId: sent.conversationId },
+      { context: contextFor(recipient) },
+    );
+    expect(thread.items[0].deletedAt).not.toBeNull();
+    expect(thread.items[0].attachments).toHaveLength(0);
+  });
+
+  it("gates attachment media: participants yes, strangers and the signed-out no, moderators only through a report", async () => {
+    const sender = await createTestUser();
+    const recipient = await createTestUser();
+    const stranger = await createTestUser();
+    const sent = await sendMedia(
+      { recipientId: recipient.id, images: [pngFile()] },
+      { context: contextFor(sender) },
+    );
+    const key = sent.attachments[0].url.slice("/media/".length);
+
+    expect(await canViewMessageMedia(contextFor(sender).db, key, sender.id)).toBe(true);
+    expect(await canViewMessageMedia(contextFor(recipient).db, key, recipient.id)).toBe(true);
+    expect(await canViewMessageMedia(contextFor(stranger).db, key, stranger.id)).toBe(false);
+    expect(await canViewMessageMedia(contextFor(recipient).db, key, null)).toBe(false);
+
+    const staff = await createTestUser();
+    await setUserRole(staff.id, "moderator");
+    expect(await canViewMessageMedia(contextFor(staff).db, key, staff.id)).toBe(false);
+    await call(
+      appRouter.moderation.report,
+      {
+        targetType: "message",
+        targetId: sent.id,
+        reason: "spam",
+        disclosure: await disclosureFor(sent.id),
+      },
+      { context: contextFor(recipient) },
+    );
+    expect(await canViewMessageMedia(contextFor(staff).db, key, staff.id)).toBe(true);
+
+    // A tombstone closes the participant pass; the report keeps the moderator's open.
+    await call(
+      appRouter.message.deleteMessage,
+      { messageId: sent.id },
+      { context: contextFor(sender) },
+    );
+    expect(await canViewMessageMedia(contextFor(sender).db, key, sender.id)).toBe(false);
+    expect(await canViewMessageMedia(contextFor(staff).db, key, staff.id)).toBe(true);
+  });
+
+  it("retains every image in report evidence after the message is deleted", async () => {
+    const sender = await createTestUser();
+    const recipient = await createTestUser();
+    const sent = await sendMedia(
+      { recipientId: recipient.id, images: [pngFile(), pngFile("second.png")] },
+      { context: contextFor(sender) },
+    );
+    await call(
+      appRouter.moderation.report,
+      {
+        targetType: "message",
+        targetId: sent.id,
+        reason: "spam",
+        disclosure: await disclosureFor(sent.id),
+      },
+      { context: contextFor(recipient) },
+    );
+    const [row] = await contextFor(recipient)
+      .db.select({ snapshotContent: report.snapshotContent })
+      .from(report)
+      .where(and(eq(report.targetType, "message"), eq(report.targetId, sent.id)))
+      .limit(1);
+    const snapshot = parseMessageReportSnapshot(row?.snapshotContent ?? null);
+    expect(snapshot?.version).toBe(2);
+    if (snapshot?.version !== 2) throw new Error("Expected a v2 message report snapshot.");
+    const reported = snapshot.messages.find((entry) => entry.id === sent.id);
+    expect(reported?.attachments.map((attachment) => attachment.url)).toEqual(
+      sent.attachments.map((attachment) => attachment.url),
+    );
+    await call(
+      appRouter.message.deleteMessage,
+      { messageId: sent.id },
+      { context: contextFor(sender) },
+    );
+    const staff = await createTestUser();
+    await setUserRole(staff.id, "moderator");
+    for (const attachment of sent.attachments) {
+      expect(
+        await canViewMessageMedia(
+          contextFor(staff).db,
+          attachment.url.slice("/media/".length),
+          staff.id,
+        ),
+      ).toBe(true);
+    }
+  });
+});
+
+it("retires failed message videos without losing the message or blocking Stream cleanup", async () => {
+  const sender = await createTestUser();
+  const recipient = await createTestUser();
+  const id = crypto.randomUUID();
+  const db = sender.context.db;
+  await db.insert(videoTable).values({
+    id,
+    authorId: sender.id,
+    state: "uploaded",
+    byteSize: 100,
+    streamCreatorId: `mytuums-test:${id}`,
+    expiresAt: new Date(Date.now() + 3_600_000),
+  });
+  const sent = await sendMedia(
+    { recipientId: recipient.id, videoId: id },
+    { context: contextFor(sender) },
+  );
+  await failStreamVideo(db, id);
+  await db
+    .update(videoCleanup)
+    .set({ createdAt: new Date(Date.now() - 2 * 86_400_000) })
+    .where(eq(videoCleanup.videoId, id));
+  const result = await cleanStreamUploads(db, {
+    remove: () => Promise.resolve(),
+    findUploads: () => Promise.resolve([]),
+  });
+  expect(result.deferred).toBe(0);
+  expect(await db.select().from(videoTable).where(eq(videoTable.id, id))).toHaveLength(0);
+  const thread = await call(
+    appRouter.message.thread,
+    { conversationId: sent.conversationId },
+    { context: contextFor(recipient) },
+  );
+  expect(thread.items[0].attachments[0]).toMatchObject({ kind: "video", video: null });
+  expect(
+    await db.select().from(messageAttachment).where(eq(messageAttachment.messageId, sent.id)),
+  ).toHaveLength(1);
 });

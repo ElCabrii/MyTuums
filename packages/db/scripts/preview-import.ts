@@ -144,6 +144,8 @@ function prepareImport(
       "message",
       "message_identity",
       "message_recovery",
+
+      "message_attachment",
     ]);
     for (const name of tableNames) {
       if (!nativeOnly.has(name) && !sourceNames.includes(name))

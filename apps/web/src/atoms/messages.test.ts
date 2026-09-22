@@ -52,6 +52,7 @@ function makeMessage(overrides: Partial<MessageItem> = {}): ThreadItem {
     body: "a message",
     createdAt: new Date(),
     deletedAt: null,
+    attachments: [],
     ...overrides,
   };
 }
@@ -130,6 +131,7 @@ it("an optimistic send appends, rolls back on refusal, and reconciles — touchi
     senderId: VIEWER,
     createdAt: new Date(),
     body: "hello",
+    attachments: [],
   };
   fakeClient.message.send.mockResolvedValueOnce(sent);
   const sending = singletonStore.get(sendMessageAtom);
@@ -149,6 +151,7 @@ it("reconciliation is idempotent when the SSE-driven refetch lands the message b
     senderId: VIEWER,
     createdAt: new Date(),
     body: "hello",
+    attachments: [],
   };
   // The server publishes the push before responding; the hook refetches and
   // the committed row is in the cache by the time onSuccess runs.
@@ -175,6 +178,73 @@ it("reconciliation is idempotent when the SSE-driven refetch lands the message b
 
   // One server row, one optimistic row retired — not the same id twice.
   expect(threadItems("c-1").map((item) => item.id)).toEqual(["server-row", "older"]);
+});
+
+it("a media send rides the wire shape and shows its kind optimistically until the server row lands", async () => {
+  seedThread("c-1", [makeMessage({ id: "older" })]);
+  const voiceFile = new File([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3])], "note.webm", {
+    type: "audio/webm",
+  });
+  const image = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "photo.png", {
+    type: "image/png",
+  });
+  const sent: SentMessage = {
+    id: "server-row",
+    conversationId: "c-1",
+    senderId: VIEWER,
+    createdAt: new Date(),
+    body: "",
+    attachments: [
+      {
+        id: "att-1",
+        kind: "image",
+        url: "/media/messages/m1/a1.png",
+        contentType: "image/png",
+        byteSize: 10,
+        position: 0,
+        width: 2,
+        height: 2,
+        durationMs: null,
+        video: null,
+      },
+    ],
+  };
+  fakeClient.message.send.mockResolvedValueOnce(sent);
+
+  const sending = singletonStore.get(sendMessageAtom);
+  const inFlight = sending.mutateAsync({
+    recipientId: OTHER,
+    body: "",
+    conversationId: "c-1",
+    images: [image],
+    voice: voiceFile,
+    voiceDurationMs: 4200,
+  });
+  await vi.waitFor(() => {
+    expect(threadItems("c-1").some((item) => item.pending)).toBe(true);
+  });
+  // The optimistic bubble knows the media group's shape: images (one message
+  // carries ONE group, so the voice note is not a second placeholder).
+  const optimistic = threadItems("c-1").find((item) => item.pending);
+  expect(optimistic?.pendingMedia).toEqual({ kind: "images", count: 1 });
+
+  await inFlight;
+  // The server row replaces the placeholder with real attachments, and the
+  // wire input arrived as the procedure declares it (voice File + its own
+  // duration field, not a wrapper object).
+  expect(fakeClient.message.send).toHaveBeenCalledWith(
+    expect.objectContaining({
+      images: [image],
+      voice: voiceFile,
+      voiceDurationMs: 4200,
+    }),
+  );
+  expect(fakeClient.message.send.mock.calls[0][0]).not.toHaveProperty("body");
+  expect(fakeClient.message.send.mock.calls[0][0]).toHaveProperty("envelope.ciphertext");
+  const items = threadItems("c-1");
+  expect(items[0].pending).toBeUndefined();
+  expect(items[0].pendingMedia).toBeUndefined();
+  expect(items[0].attachments).toEqual(sent.attachments);
 });
 
 it("deleting the caller's own message tombstones it optimistically and restores it on refusal", async () => {
@@ -204,7 +274,13 @@ it("markRead patches the inbox row's unread count from the mutation's answer", a
     lastMessageAt: new Date(),
     lastReadAt: null,
     unreadCount: 2,
-    lastMessage: { encrypted: false, senderId: OTHER, body: "hello?", createdAt: new Date() },
+    lastMessage: {
+      encrypted: false,
+      senderId: OTHER,
+      body: "hello?",
+      mediaKind: null,
+      createdAt: new Date(),
+    },
     user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
   };
   singletonQueryClient.setQueryData(orpc.message.conversations.key(), {

@@ -61,15 +61,36 @@
     {
       "idx": 8,
       "version": "6",
-      "when": 1790025399550,
-      "tag": "0008_romantic_pestilence",
+      "when": 1789654048517,
+      "tag": "0008_message_media",
       "breakpoints": true
     },
     {
       "idx": 9,
       "version": "6",
-      "when": 1790026728399,
-      "tag": "0009_encrypted_message_writes",
+      "when": 1789900732094,
+      "tag": "0009_special_shiva",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1789901186706,
+      "tag": "0010_message_media_cleanup",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1790113989950,
+      "tag": "0011_recoverable_message_encryption",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1790113998369,
+      "tag": "0012_encrypted_message_writes",
       "breakpoints": true
     }
   ]

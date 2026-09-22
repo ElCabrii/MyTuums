@@ -407,3 +407,21 @@ build cache key. The branding build shares this plugin.
 ## Recoverable messages
 
 `src/atoms/message-access.ts` and `src/components/message-access.tsx` gate messaging on a local account identity. `src/lib/message-key-store.ts` retains non-extractable keys in IndexedDB; signing out clears plaintext caches but retains trusted-browser keys. Threads decrypt locally through `@my-tuums/message-crypto`; inbox previews stay generic. See [email recovery and privacy limits](../../docs/message-encryption.md).
+
+## Message attachments
+
+`src/components/message-thread.tsx` owns the recipient-scoped composer: up to
+four images, one voice message, or one video, optionally with text. Image
+acceptance/re-encoding, the media picker and Stream upload atoms are shared
+with posts. A selected video blocks sending until upload completes.
+`src/lib/voice-recorder.ts` owns microphone capture, cancellation (including a
+late permission grant), the five-minute limit and track release. Stop during
+pending microphone permission cancels capture and releases any late grant. Preview
+components own and revoke their object URLs.
+
+`src/components/message-attachments.tsx` renders both thread attachments and
+report evidence. Processing videos poll while their thread is open; published
+videos use the existing player. `src/lib/message-preview.ts` supplies consistent
+media-only previews to the inbox and request list. The desktop messages pane
+uses the full viewport width. Verify with the message atom/thread DOM suites,
+voice-recorder tests, moderation case tests, and local browser inspection.

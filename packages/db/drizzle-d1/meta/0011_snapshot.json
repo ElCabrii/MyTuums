@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "daa9f8d5-1caf-4f71-a457-1372c2c32061",
-  "prevId": "9dd72261-bbe9-4de9-83e0-45a52610f9b7",
+  "id": "dcad20db-e2da-4634-a75d-fdbc0cf150cf",
+  "prevId": "faebaa15-303d-49c3-93c9-895089c87a83",
   "tables": {
     "account": {
       "name": "account",
@@ -1878,6 +1878,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "envelope": {
+          "name": "envelope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -2025,6 +2032,16 @@
           "name": "message_attachment_message_idx",
           "columns": ["message_id"],
           "isUnique": false
+        },
+        "message_attachment_media_path_idx": {
+          "name": "message_attachment_media_path_idx",
+          "columns": ["media_path"],
+          "isUnique": true
+        },
+        "message_attachment_video_idx": {
+          "name": "message_attachment_video_idx",
+          "columns": ["video_id"],
+          "isUnique": true
         }
       },
       "foreignKeys": {
@@ -2043,7 +2060,7 @@
           "tableTo": "video",
           "columnsFrom": ["video_id"],
           "columnsTo": ["id"],
-          "onDelete": "no action",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -2059,6 +2076,139 @@
           "value": "\"message_attachment\".\"byte_size\" > 0"
         }
       }
+    },
+    "message_identity": {
+      "name": "message_identity",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "public_identity": {
+          "name": "public_identity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "backup": {
+          "name": "backup",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "recovery_key_id": {
+          "name": "recovery_key_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(cast(unixepoch('subsec') * 1000 as integer))"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "message_identity_user_id_user_id_fk": {
+          "name": "message_identity_user_id_user_id_fk",
+          "tableFrom": "message_identity",
+          "tableTo": "user",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "message_recovery": {
+      "name": "message_recovery",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "code_hash": {
+          "name": "code_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "transport_key": {
+          "name": "transport_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "message_recovery_user_id_user_id_fk": {
+          "name": "message_recovery_user_id_user_id_fk",
+          "tableFrom": "message_recovery",
+          "tableTo": "user",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
     },
     "moderation_action": {
       "name": "moderation_action",

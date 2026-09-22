@@ -104,7 +104,7 @@ export const messagePlaintextSchema = z.strictObject({
   id: z.uuid(),
   senderId: z.string().min(1).max(128),
   recipientId: z.string().min(1).max(128),
-  body: z.string().trim().min(1).max(2000),
+  body: z.string().trim().max(2000),
 });
 export type MessagePlaintext = z.infer<typeof messagePlaintextSchema>;
 

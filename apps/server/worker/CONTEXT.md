@@ -273,3 +273,14 @@ and jobs bindings; see [local development](../../../docs/operations.md#local-dev
 ## Recoverable messages
 
 `index.ts` injects `MESSAGE_RECOVERY_KEYRING` as an independent Worker secret. Missing configuration disables messaging setup/recovery. Only development/e2e entrypoints import the public synthetic `local-message-recovery.ts` fixture. The deployed Worker itself is trusted to recover history; see [custody and rollout](../../../docs/message-encryption.md).
+
+## Message media delivery
+
+The application media authorizer routes `messages/` keys through the message
+participant/report gate. `media.ts` serves allowlisted voice containers as well
+as raster images, with the same authorization before and after storage access
+and private/no-store responses. Voice objects do not derive image variants.
+Video manifests use the existing Stream resolver with message authorization
+as an alternative to post visibility. The application injects `videoJobs` into
+the API so a message send dispatches its committed video-processing intent.
+The native media test covers authorized voice delivery and signed-out refusal.

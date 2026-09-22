@@ -121,7 +121,7 @@ export const conversationWithFamily = atomFamily((userId: string) =>
 );
 
 /** A thread row as it lives in the cache; `pending` marks an optimistic send. */
-export type ThreadItem = MessageItem & { pending?: boolean };
+export type ThreadItem = MessageItem & { pending?: boolean; pendingMedia?: PendingMedia };
 type ThreadCache = { pages: Array<{ items: ThreadItem[]; nextCursor: string | null }> };
 type ThreadSnapshot = Array<[readonly unknown[], ThreadCache | undefined]>;
 
@@ -197,6 +197,29 @@ interface SendVariables {
   body: string;
   /** The open thread the composer sits in, when there is one. */
   conversationId?: string;
+  /**
+   * Media stays on the existing upload path; the mutation encrypts the body
+   * and sends only the envelope beside these attachments.
+   */
+  images?: File[];
+  voice?: File;
+  voiceDurationMs?: number;
+  videoId?: string;
+}
+
+/**
+ * What an optimistic row shows while the send is in flight. The real
+ * attachments arrive with the server's row; these placeholders only have to
+ * say what kind of media is coming.
+ */
+export type PendingMedia =
+  { kind: "images"; count: number } | { kind: "voice"; durationMs: number } | { kind: "video" };
+
+function pendingMediaOf(variables: SendVariables): PendingMedia | undefined {
+  if (variables.images?.length) return { kind: "images", count: variables.images.length };
+  if (variables.voice) return { kind: "voice", durationMs: variables.voiceDurationMs ?? 0 };
+  if (variables.videoId) return { kind: "video" };
+  return undefined;
 }
 
 /**
@@ -233,7 +256,14 @@ export const sendMessageAtom = atomWithMutation<
   const viewerId = get(viewerIdAtom);
 
   return {
-    mutationFn: async ({ recipientId, body }: SendVariables): Promise<SentMessage> => {
+    mutationFn: async ({
+      recipientId,
+      body,
+      images,
+      voice,
+      voiceDurationMs,
+      videoId,
+    }: SendVariables): Promise<SentMessage> => {
       const local = get(messageAccessAtom).data?.local;
       if (!local || local.public.userId !== get(viewerIdAtom))
         throw new Error(m.messages_encryption_error());
@@ -246,15 +276,24 @@ export const sendMessageAtom = atomWithMutation<
         recipient,
       );
       if (local.public.userId !== get(viewerIdAtom)) throw new Error(m.messages_encryption_error());
-      const sent = await client.message.send({ id, recipientId, envelope });
+      const sent = await client.message.send({
+        id,
+        recipientId,
+        envelope,
+        images,
+        voice,
+        voiceDurationMs,
+        videoId,
+      });
       if (local.public.userId !== get(viewerIdAtom)) throw new Error(m.messages_encryption_error());
       return { ...sent, body };
     },
-    onMutate: ({ conversationId, body }) => {
+    onMutate: ({ conversationId, body, ...media }) => {
       if (!conversationId || !viewerId) return { snapshot: undefined };
       const key = threadKeyOf(conversationId);
       void queryClient.cancelQueries({ queryKey: key });
       const snapshot = snapshotOf(queryClient, key);
+      const pendingMedia = pendingMediaOf({ body, ...media });
       queryClient.setQueriesData<ThreadCache>({ queryKey: key }, (data) =>
         data
           ? {
@@ -272,7 +311,9 @@ export const sendMessageAtom = atomWithMutation<
                           body,
                           createdAt: new Date(),
                           deletedAt: null,
+                          attachments: [],
                           pending: true,
+                          pendingMedia,
                         },
                         ...page.items,
                       ],
@@ -349,7 +390,13 @@ export const deleteMessageAtom = atomWithMutation<
                 ...page,
                 items: page.items.map((item) =>
                   item.id === messageId
-                    ? { ...item, body: null, deletedAt: item.deletedAt ?? new Date() }
+                    ? {
+                        ...item,
+                        body: null,
+                        // The projection hides attachments with the body.
+                        attachments: [],
+                        deletedAt: item.deletedAt ?? new Date(),
+                      }
                     : item,
                 ),
               })),

@@ -20,7 +20,7 @@ export interface ReconcileMediaResult {
   deleted: number;
 }
 
-const PREFIXES = ["avatars/", "banners/", "posts/", "link-cards/", "games/"] as const;
+const PREFIXES = ["avatars/", "banners/", "posts/", "messages/", "link-cards/", "games/"] as const;
 
 export async function reconcileMedia({
   storage,
