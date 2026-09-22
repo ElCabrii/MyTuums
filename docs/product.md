@@ -269,7 +269,14 @@ menu; the navigation bar has no standalone theme button.
 One text-only conversation per pair of users, ever — whoever writes first, the
 thread is the same. Anyone signed in can message anyone except themselves and
 users across a block (either direction); private accounts are messageable like
-anyone else.
+anyone else. Both participants must first enable encrypted messaging.
+
+New bodies are encrypted in the browser. Email recovery allows MyTuums to
+unlock history, so this is not provider-inaccessible E2EE. A new browser uses
+a fresh email code after normal sign-in, with no separate messaging password.
+Trusted browsers retain keys until site data is cleared. Old plaintext rows
+are labeled, and encrypted inbox previews show “Encrypted message”. See
+[the privacy and recovery limits](message-encryption.md).
 
 **Message requests** are the anti-spam gate, and deliberately not a per-user
 setting: a first message from someone the recipient does not follow lands as a
@@ -295,10 +302,10 @@ displayed message. Live delivery rides a server-sent event stream —
 `/events/messages` — that pushes thin refresh notices; a missed push loses
 nothing, and the badge and open thread refetch on reconnect and focus.
 
-Reporting a message works from the thread (tombstones included): the report
-snapshots the message plus up to ten before it, moderators see that snapshot
-with both parties' handles, and every sanction lands on the sender. There is
-deliberately no moderator browse surface for conversations.
+Reporting a readable encrypted message explicitly discloses only that selected
+message as signed plaintext evidence. Legacy reports retain up to ten preceding
+legacy messages. Moderators see report snapshots; every sanction lands on the
+sender. There is deliberately no moderator browse surface for conversations.
 
 ## Notifications
 
@@ -665,7 +672,7 @@ different thing), shadowban.
 **Message** — one private text row inside a conversation, at most 2,000
 characters, rendered with the same safe linkification as a post. A sender's
 deletion is a tombstone ("message deleted"), never a row delete. Reportable
-from the thread; reports carry the message plus its bounded context to
+from the thread while readable; encrypted reports disclose only that message to
 moderation. _Avoid:_ DM (the whole feature), chat.
 
 **Conversation** — the single thread two users share, created idempotently by

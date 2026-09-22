@@ -397,7 +397,7 @@ export const queueRouter = {
                 .select({
                   id: message.id,
                   conversationId: message.conversationId,
-                  body: message.body,
+                  body: sql<string>`case when ${message.envelope} is null then ${message.body} else '' end`,
                   createdAt: message.createdAt,
                   deletedAt: message.deletedAt,
                   sender: {
@@ -751,7 +751,7 @@ async function loadPreviews(
     const rows = await db
       .select({
         id: message.id,
-        body: message.body,
+        body: sql<string>`case when ${message.envelope} is null then ${message.body} else '' end`,
         deletedAt: message.deletedAt,
         sender: {
           id: user.id,
@@ -764,10 +764,22 @@ async function loadPreviews(
       .from(message)
       .innerJoin(user, eq(user.id, message.senderId))
       .where(textIn(message.id, messageIds));
+    const evidenceRows = await db
+      .select({ targetId: report.targetId, snapshotContent: report.snapshotContent })
+      .from(report)
+      .where(and(eq(report.targetType, "message"), textIn(report.targetId, messageIds)))
+      .orderBy(desc(report.createdAt));
+    const disclosed = new Map<string, string>();
+    for (const evidence of evidenceRows) {
+      if (disclosed.has(evidence.targetId)) continue;
+      const snapshot = parseMessageReportSnapshot(evidence.snapshotContent);
+      const selected = snapshot?.messages.find((item) => item.id === evidence.targetId);
+      if (selected) disclosed.set(evidence.targetId, selected.body);
+    }
     for (const row of rows) {
       previews.set(`message:${row.id}`, {
         kind: "message",
-        ...excerptOf(row.body),
+        ...excerptOf(disclosed.get(row.id) ?? row.body),
         deleted: row.deletedAt !== null,
         sender: row.sender,
       });

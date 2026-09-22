@@ -75,7 +75,14 @@ function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
         {/* The post being reported, so the reporter confirms what they are
             flagging before picking a reason. A user target has no post. */}
         {target.targetType === "post" && <ReportPreview post={target.post} />}
-        {target.targetType === "message" && <MessageReportPreview body={target.body} />}
+        {target.targetType === "message" && (
+          <>
+            <MessageReportPreview body={target.body} />
+            {target.disclosure && (
+              <p className="text-muted-foreground text-sm">{m.messages_report_disclosure()}</p>
+            )}
+          </>
+        )}
         {/* `items` is what makes the trigger read "Hate speech" once a reason
             is picked: Base UI renders the raw code otherwise. */}
         <Select
@@ -124,6 +131,7 @@ function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
                   // the schema's own union, not a coercion.
                   report.mutate({
                     targetType: target.targetType,
+                    disclosure: target.targetType === "message" ? target.disclosure : undefined,
                     targetId: target.targetId,
                     reason: trimmed as (typeof POST_REPORT_REASONS)[number],
                   });

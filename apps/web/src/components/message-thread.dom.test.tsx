@@ -1,8 +1,15 @@
+import {
+  createIdentity,
+  publicIdentity,
+  unlockIdentity,
+  type LocalIdentity,
+} from "@my-tuums/message-crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { fireEvent, waitFor } from "@testing-library/react";
 import { useState, type ReactElement } from "react";
 
 const fakeClient = {
+  messageKey: { identity: vi.fn(), status: vi.fn() },
   message: {
     send: vi.fn(),
     conversations: vi.fn(),
@@ -18,10 +25,9 @@ const fakeClient = {
   },
 };
 
-installTestOrpc(createTanstackQueryUtils(fakeClient));
+installTestClient(fakeClient);
 
-import { createTanstackQueryUtils } from "@orpc/tanstack-query";
-import { installTestOrpc, orpc } from "@/lib/orpc";
+import { installTestClient, orpc } from "@/lib/orpc";
 import type { MessageItem } from "@/lib/orpc";
 import { messageThreadQueryOptions } from "@/lib/query-definitions";
 import { clearMessageDrafts } from "@/atoms/messages";
@@ -46,6 +52,7 @@ type ThreadSeed = {
 
 const VIEWER = "viewer-1";
 const OTHER = "user-2";
+let local: LocalIdentity;
 
 function pageMessage(overrides: Partial<MessageItem> = {}): MessageItem {
   return {
@@ -102,11 +109,20 @@ function ConversationSwitcher() {
 
 function makePane(element: ReactElement) {
   const queryClient = createTestQueryClient();
+  queryClient.setQueryData(["message-access", VIEWER], {
+    local,
+    identity: local.public,
+    recovery: null,
+  });
   const render = () => renderWithProviders(element, { signedInAs: { id: VIEWER }, queryClient });
   return { queryClient, render };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  local = await unlockIdentity(await createIdentity(VIEWER));
+  const recipient = await createIdentity(OTHER);
+  fakeClient.messageKey.identity.mockResolvedValue(publicIdentity(recipient));
+  fakeClient.messageKey.status.mockResolvedValue({ identity: local.public, recovery: null });
   fakeClient.message.markRead.mockReset();
   fakeClient.message.markRead.mockResolvedValue({ lastReadAt: new Date(), advanced: true });
   fakeClient.message.thread.mockReset();
@@ -293,7 +309,14 @@ it("first contact seeds the thread and the draft typed during the move survives 
 
   fireEvent.change(composer(), { target: { value: "first contact" } });
   fireEvent.click(screen.getByRole("button", { name: "Send" }));
-  await waitFor(() => expect(fakeClient.message.send).toHaveBeenCalled());
+  await waitFor(() => {
+    const failure = queryClient
+      .getMutationCache()
+      .getAll()
+      .find((mutation) => mutation.state.error)?.state.error;
+    if (failure) throw failure;
+    expect(fakeClient.message.send).toHaveBeenCalled();
+  });
 
   // The sent message is in the destination thread's cache under the exact
   // key its query mounts with.

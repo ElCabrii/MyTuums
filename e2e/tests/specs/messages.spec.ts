@@ -1,3 +1,5 @@
+import { testPlatform } from "../../support/platform";
+import { z } from "zod";
 import { openSessionAs, test, expect } from "../../support/fixtures";
 import type { Page } from "@playwright/test";
 import { ALICE, BOB } from "../../support/users";
@@ -21,6 +23,41 @@ async function unreadOnMail(page: Page): Promise<number> {
   return match ? Number(match[1]) : 0;
 }
 
+/** Real browser key generation and fresh-email recovery; captured mail stays in the isolated E2E bucket. */
+async function unlockMessages(page: Page, email: string) {
+  await page.goto("/messages");
+  const setup = page.getByRole("button", { name: "Enable encrypted messaging" });
+  const recover = page.getByRole("button", { name: "Recover message history by email" });
+  const unlocked = page.getByRole("heading", { name: "Messages", exact: true });
+  await expect(setup.or(recover).or(unlocked)).toBeVisible();
+  if (await setup.isVisible()) {
+    await setup.click();
+  } else if (await recover.isVisible()) {
+    const { bucket } = await testPlatform();
+    const before = new Set(
+      (await bucket.list({ prefix: "__e2e_emails/" })).objects.map((entry) => entry.key),
+    );
+    await recover.click();
+    let code: string | null = null;
+    await expect
+      .poll(async () => {
+        const objects = await bucket.list({ prefix: "__e2e_emails/" });
+        for (const entry of objects.objects) {
+          if (before.has(entry.key)) continue;
+          const object = await bucket.get(entry.key);
+          if (!object) continue;
+          const message = z.object({ to: z.string(), text: z.string() }).parse(await object.json());
+          if (message.to === email) code = message.text.match(/[A-F0-9]{16}/)?.[0] ?? null;
+        }
+        return code !== null;
+      })
+      .toBe(true);
+    await page.getByLabel("Message recovery code").fill(code ?? "");
+    await page.getByRole("button", { name: "Unlock messages", exact: true }).click();
+  }
+  await expect(unlocked).toBeVisible();
+}
+
 test.describe("messages", () => {
   test("a first message lands as a request, accepting moves it to the inbox, and the reply arrives live", async ({
     page,
@@ -33,6 +70,8 @@ test.describe("messages", () => {
     // accepted and active: a repeat "first" message would land straight in
     // the inbox. Resetting the pair makes the request gate assertable.
     await db.deleteConversationBetween(aliceId, bobId);
+    await unlockMessages(page, ALICE.email);
+    await unlockMessages(bobPage, BOB.email);
 
     // Bob opens the message composer from alice's profile and sends the
     // first message — the conversation is created by the send itself.
@@ -61,7 +100,7 @@ test.describe("messages", () => {
 
     await page.getByRole("link", { name: /Message requests/ }).click();
     await expect(page).toHaveURL(/\/messages\/requests$/);
-    await expect(page.getByText(firstMessage)).toBeVisible();
+    await expect(page.getByText("Encrypted message", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Accept" }).click();
 
     // The accepted conversation is in her inbox; opening it shows the
@@ -88,6 +127,19 @@ test.describe("messages", () => {
     await page.reload();
     await expect(page.locator("section").getByText(reply)).toBeVisible();
     await expect.poll(async () => unreadOnMail(page), { timeout: 10_000 }).toBe(0);
+    const threadUrl = page.url();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const request = indexedDB.deleteDatabase("mytuums-message-keys-v1");
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(new Error("Could not clear local message keys."));
+          request.onblocked = () => reject(new Error("Message key database is still open."));
+        }),
+    );
+    await unlockMessages(page, ALICE.email);
+    await page.goto(threadUrl);
+    await expect(page.locator("section").getByText(reply)).toBeVisible();
   });
 });
 
@@ -101,6 +153,8 @@ test.describe("messages: multi-session", () => {
     const aliceId = await db.getUserId(ALICE.username);
     const bobId = await db.getUserId(BOB.username);
     await db.deleteConversationBetween(aliceId, bobId);
+    await unlockMessages(page, ALICE.email);
+    await unlockMessages(bobPage, BOB.email);
     // The sender's other device shares the same hub: one account, two live
     // sessions, the same conversation open in the second one.
     const secondSession = await openSessionAs(browser, "alice", testInfo);
@@ -126,6 +180,7 @@ test.describe("messages: multi-session", () => {
         await row.click();
         await expect(target.locator("section").getByText(opener)).toBeVisible();
       };
+      await unlockMessages(secondSession, ALICE.email);
       await openThread(secondSession);
       await openThread(page);
 

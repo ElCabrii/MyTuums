@@ -16,7 +16,7 @@ import type { Post } from "@/lib/orpc";
 export type ReportDialogTarget =
   | { targetType: "post"; targetId: string; post: Post }
   | { targetType: "user"; targetId: string }
-  | { targetType: "message"; targetId: string; body: string | null };
+  | { targetType: "message"; targetId: string; body: string | null; disclosure?: string };
 
 /** Which report dialog is open: the target being reported, or null. */
 export const reportDialogAtom = atom<ReportDialogTarget | null>(null);

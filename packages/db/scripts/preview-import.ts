@@ -128,7 +128,7 @@ function prepareImport(
       throw new Error("Duplicate source table.");
     // Tables that legitimately postdate the production snapshot's format:
     // native runtime tables, and application tables introduced after the
-    // last snapshot was captured (issue #408's private messages). Everything
+    // last snapshot was captured (private messages and encryption recovery). Everything
     // else must be present — a genuinely missing table is drift, not novelty.
     const nativeOnly = new Set([
       "__drizzle_migrations",
@@ -142,6 +142,8 @@ function prepareImport(
       "conversation",
       "conversation_participant",
       "message",
+      "message_identity",
+      "message_recovery",
     ]);
     for (const name of tableNames) {
       if (!nativeOnly.has(name) && !sourceNames.includes(name))

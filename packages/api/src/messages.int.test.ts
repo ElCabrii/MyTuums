@@ -1,3 +1,12 @@
+import {
+  createIdentity,
+  unlockIdentity,
+  encryptMessage,
+  decryptMessage,
+  envelopeSchema,
+  type LocalIdentity,
+  type MessagePlaintext,
+} from "@my-tuums/message-crypto";
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
 import { and, eq } from "drizzle-orm";
@@ -5,6 +14,8 @@ import {
   conversation,
   conversationParticipant,
   message as messageTable,
+  messageIdentity,
+  user as userTable,
   moderationAction,
   report,
 } from "@my-tuums/db/schema";
@@ -33,15 +44,79 @@ afterAll(async () => {
   await closeDb();
 });
 
-async function send(context: Context, recipientId: string, body: string) {
-  return call(appRouter.message.send, { recipientId, body }, { context });
+const keys = new Map<string, Promise<LocalIdentity>>();
+const delivered = new Map<string, { plaintext: MessagePlaintext; envelope: string }>();
+
+async function keyFor(context: Context, userId: string) {
+  let pending = keys.get(userId);
+  if (!pending) {
+    pending = createIdentity(userId).then(unlockIdentity);
+    keys.set(userId, pending);
+  }
+  const key = await pending;
+  const [account] = await context.db
+    .select({ id: userTable.id })
+    .from(userTable)
+    .where(eq(userTable.id, userId))
+    .limit(1);
+  if (account)
+    await context.db
+      .insert(messageIdentity)
+      .values({
+        userId,
+        publicIdentity: JSON.stringify(key.public),
+        backup: "synthetic-unused-backup",
+        recoveryKeyId: "test",
+      })
+      .onConflictDoNothing();
+  return key;
 }
 
-/** A send that must fail, asserting its error code in one step. */
-function sendExpectError(context: Context, recipientId: string, body: string, code: string) {
-  return expect(
-    call(appRouter.message.send, { recipientId, body }, { context }),
-  ).rejects.toMatchObject({ code });
+async function sendInput(context: Context, recipientId: string, body: string) {
+  const senderId = context.session!.user.id;
+  const sender = await keyFor(context, senderId);
+  const recipient = await keyFor(
+    context,
+    recipientId === senderId ? "synthetic-self-target" : recipientId,
+  );
+  const plaintext: MessagePlaintext = {
+    version: 1,
+    id: randomUUID(),
+    senderId,
+    recipientId: recipient.public.userId,
+    body,
+  };
+  const envelope = await encryptMessage(plaintext, sender, recipient.public);
+  delivered.set(plaintext.id, { plaintext, envelope: JSON.stringify(envelope) });
+  return { id: plaintext.id, recipientId, envelope };
+}
+
+async function send(context: Context, recipientId: string, body: string) {
+  return call(appRouter.message.send, await sendInput(context, recipientId, body), { context });
+}
+
+async function disclosed(id: string) {
+  const fixture = delivered.get(id)!;
+  const reader = await keys.get(fixture.plaintext.recipientId)!;
+  const sender = await keys.get(fixture.plaintext.senderId)!;
+  return decryptMessage(
+    envelopeSchema.parse(JSON.parse(fixture.envelope)),
+    reader,
+    sender.public,
+    fixture.plaintext,
+  );
+}
+
+async function readBody(item: { id: string; body: string | null; envelope: string | null }) {
+  return item.envelope ? (await disclosed(item.id)).message.body : item.body;
+}
+
+async function disclosureFor(id: string) {
+  return (await disclosed(id)).disclosure;
+}
+
+async function sendExpectError(context: Context, recipientId: string, body: string, code: string) {
+  return expect(send(context, recipientId, body)).rejects.toMatchObject({ code });
 }
 
 /** Every messaging row the refused pair could have created — must stay empty. */
@@ -70,18 +145,16 @@ describe("message.send guards", () => {
     });
   });
 
-  it("refuses empty and whitespace-only bodies, and bodies past 2000 characters", async () => {
+  it("refuses plaintext writes from old clients instead of silently downgrading", async () => {
     const sender = await createTestUser();
     const recipient = await createTestUser();
-    await expect(send(contextFor(sender), recipient.id, "")).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-    });
-    await expect(send(contextFor(sender), recipient.id, "   \n\t ")).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-    });
-    await expect(send(contextFor(sender), recipient.id, "x".repeat(2001))).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-    });
+    const input = {
+      ...(await sendInput(contextFor(sender), recipient.id, "encrypted")),
+      body: "plaintext",
+    };
+    await expect(
+      call(appRouter.message.send, input, { context: contextFor(sender) }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("refuses a missing recipient with NOT_FOUND", async () => {
@@ -134,11 +207,18 @@ describe("conversation lifecycle", () => {
     const recipient = await createTestUser();
 
     const sent = await send(contextFor(sender), recipient.id, "hello there");
+    const [stored] = await contextFor(sender)
+      .db.select()
+      .from(messageTable)
+      .where(eq(messageTable.id, sent.id));
+    expect(stored.body).toBe("[encrypted]");
+    expect(stored.envelope).not.toContain("hello there");
 
     const requests = await call(appRouter.message.requests, {}, { context: contextFor(recipient) });
     expect(requests.items.map((item) => item.conversationId)).toEqual([sent.conversationId]);
     expect(requests.items[0].user.id).toBe(sender.id);
-    expect(requests.items[0].lastMessage?.body).toBe("hello there");
+    expect(requests.items[0].lastMessage?.body).toBeNull();
+    expect(requests.items[0].lastMessage?.encrypted).toBe(true);
 
     const inbox = await call(
       appRouter.message.conversations,
@@ -220,7 +300,10 @@ describe("conversation lifecycle", () => {
       { conversationId: sent.conversationId },
       { context: contextFor(sender) },
     );
-    expect(thread.items.map((item) => item.body)).toEqual(["second (into the void)", "first"]);
+    expect(await Promise.all(thread.items.map(readBody))).toEqual([
+      "second (into the void)",
+      "first",
+    ]);
 
     // The decliner sees nothing anywhere: no inbox row, no request, no badge.
     const inbox = await call(
@@ -306,7 +389,10 @@ describe("conversation lifecycle", () => {
       { conversationId: toBob.conversationId },
       { context: contextFor(alice) },
     );
-    expect(thread.items.map((item) => item.body).sort()).toEqual(["from alice", "from bob"]);
+    expect((await Promise.all(thread.items.map(readBody))).sort()).toEqual([
+      "from alice",
+      "from bob",
+    ]);
   });
 });
 
@@ -484,7 +570,7 @@ describe("thread reads and pagination", () => {
       { context: contextFor(recipient) },
     );
     expect(hiddenThread.hidden).toBe(true);
-    expect(hiddenThread.items.map((item) => item.body)).toEqual(["private"]);
+    expect(await Promise.all(hiddenThread.items.map(readBody))).toEqual(["private"]);
     const marked = await call(
       appRouter.message.markRead,
       { conversationId: sent.conversationId, lastSeenMessageId: sent.id },
@@ -532,7 +618,7 @@ describe("thread reads and pagination", () => {
         { conversationId: first.conversationId, cursor, limit: 2 },
         { context: contextFor(recipient) },
       );
-      seen.push(...page.items.map((item) => item.body ?? ""));
+      seen.push(...(await Promise.all(page.items.map(readBody))).map((body) => body ?? ""));
       cursor = page.nextCursor ?? undefined;
       pages += 1;
       if (pages > 10) throw new Error("thread pagination looks like it is looping");
@@ -802,7 +888,12 @@ describe("reporting messages", () => {
     await expect(
       call(
         appRouter.moderation.report,
-        { targetType: "message", targetId: sent.id, reason: "harassment" },
+        {
+          targetType: "message",
+          targetId: sent.id,
+          reason: "harassment",
+          disclosure: await disclosureFor(sent.id),
+        },
         { context: contextFor(outsider) },
       ),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
@@ -815,7 +906,35 @@ describe("reporting messages", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("snapshots the reported message plus up to ten preceding ones in reading order", async () => {
+  it("refuses undisclosed, forged and transplanted report evidence", async () => {
+    const sender = await createTestUser();
+    const recipient = await createTestUser();
+    const selected = await send(contextFor(sender), recipient.id, "selected message");
+    const neighbor = await send(contextFor(sender), recipient.id, "different message");
+    const signed = await disclosureFor(selected.id);
+    const forged = signed.slice(0, -10) + (signed.at(-10) === "A" ? "B" : "A") + signed.slice(-9);
+    for (const disclosure of [undefined, forged, await disclosureFor(neighbor.id)]) {
+      await expect(
+        call(
+          appRouter.moderation.report,
+          {
+            targetType: "message",
+            targetId: selected.id,
+            reason: "harassment",
+            disclosure,
+          },
+          { context: contextFor(recipient) },
+        ),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+    const rows = await contextFor(sender)
+      .db.select()
+      .from(report)
+      .where(eq(report.targetId, selected.id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("discloses only the selected encrypted message, never neighboring messages", async () => {
     const sender = await createTestUser();
     const recipient = await createTestUser();
     for (let i = 1; i <= 12; i++) {
@@ -835,7 +954,12 @@ describe("reporting messages", () => {
 
     await call(
       appRouter.moderation.report,
-      { targetType: "message", targetId: reported.id, reason: "harassment" },
+      {
+        targetType: "message",
+        targetId: reported.id,
+        reason: "harassment",
+        disclosure: await disclosureFor(reported.id),
+      },
       { context: contextFor(recipient) },
     );
 
@@ -846,15 +970,10 @@ describe("reporting messages", () => {
       .limit(1);
     const snapshot = parseMessageReportSnapshot(row?.snapshotContent ?? null);
     expect(snapshot).not.toBeNull();
-    // The window is the reported message plus AT MOST ten before it.
-    expect(snapshot!.messages).toHaveLength(11);
+    // Encrypted neighbors are never included in a selected-message disclosure.
+    expect(snapshot!.messages).toHaveLength(1);
     expect(snapshot!.reportedMessageId).toBe(reported.id);
-    expect(snapshot!.messages.at(-1)?.body).toBe("message 12");
-    expect(snapshot!.messages[0].body).toBe("message 2");
-    // Reading order: oldest first — each row's number is one more than the last.
-    expect(snapshot!.messages.map((m) => Number(m.body.split(" ")[1]))).toEqual(
-      snapshot!.messages.map((_m, index) => index + 2),
-    );
+    expect(snapshot!.messages[0].body).toBe("message 12");
   });
 
   it("a participant may report across a block and after the sender deleted the message — the snapshot keeps the evidence", async () => {
@@ -875,7 +994,12 @@ describe("reporting messages", () => {
 
     await call(
       appRouter.moderation.report,
-      { targetType: "message", targetId: sent.id, reason: "harassment" },
+      {
+        targetType: "message",
+        targetId: sent.id,
+        reason: "harassment",
+        disclosure: await disclosureFor(sent.id),
+      },
       { context: contextFor(recipient) },
     );
 
@@ -904,7 +1028,12 @@ describe("the moderation view of a message case", () => {
 
     await call(
       appRouter.moderation.report,
-      { targetType: "message", targetId: taunt.id, reason: "harassment" },
+      {
+        targetType: "message",
+        targetId: taunt.id,
+        reason: "harassment",
+        disclosure: await disclosureFor(taunt.id),
+      },
       { context: contextFor(victim) },
     );
 
@@ -926,7 +1055,7 @@ describe("the moderation view of a message case", () => {
     );
     expect(detail.target.kind).toBe("message");
     if (detail.target.kind === "message") {
-      expect(detail.target.message?.body).toBe("reported words");
+      expect(detail.target.message?.body).toBe("");
       expect(detail.target.sender?.id).toBe(sender.id);
       expect(detail.target.evidence).toHaveLength(1);
       expect(detail.target.evidence[0].snapshot.reportedMessageId).toBe(taunt.id);
@@ -960,7 +1089,12 @@ describe("the moderation view of a message case", () => {
     );
     await call(
       appRouter.moderation.report,
-      { targetType: "message", targetId: unreported.id, reason: "harassment" },
+      {
+        targetType: "message",
+        targetId: unreported.id,
+        reason: "harassment",
+        disclosure: await disclosureFor(unreported.id),
+      },
       { context: contextFor(victim) },
     );
     const detail = await call(
@@ -982,7 +1116,12 @@ describe("the moderation view of a message case", () => {
 
     await call(
       appRouter.moderation.report,
-      { targetType: "message", targetId: taunt.id, reason: "harassment" },
+      {
+        targetType: "message",
+        targetId: taunt.id,
+        reason: "harassment",
+        disclosure: await disclosureFor(taunt.id),
+      },
       { context: contextFor(victim) },
     );
     const resolved = await call(
@@ -1025,18 +1164,14 @@ describe("the push layer is strictly best-effort", () => {
       },
     };
 
-    const sent = await call(
-      appRouter.message.send,
-      { recipientId: recipient.id, body: "delivered anyway" },
-      { context: failing },
-    );
-    expect(sent.body).toBe("delivered anyway");
+    const sent = await send(failing, recipient.id, "delivered anyway");
+    expect(sent.body).toBeNull();
 
     const thread = await call(
       appRouter.message.thread,
       { conversationId: sent.conversationId },
       { context: contextFor(recipient) },
     );
-    expect(thread.items[0].body).toBe("delivered anyway");
+    expect(await readBody(thread.items[0])).toBe("delivered anyway");
   });
 });

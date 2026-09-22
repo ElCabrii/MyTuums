@@ -97,6 +97,21 @@ async function brandedEmail(
   };
 }
 
+/** Message recovery explicitly grants the requesting browser access to retained history. */
+export function messageRecoveryEmail(webOrigin: string, code: string, locale: EmailLocale) {
+  const copy =
+    locale === "fr"
+      ? {
+          subject: "Récupération de vos messages MyTuums",
+          text: `Votre code de récupération des messages est : ${code}\n\nIl expire dans 10 minutes et permet à ce navigateur de déchiffrer votre historique. Ne le partagez avec personne. Si vous n'avez pas demandé cette récupération, sécurisez votre compte.`,
+        }
+      : {
+          subject: "Recover your MyTuums messages",
+          text: `Your message recovery code is: ${code}\n\nIt expires in 10 minutes and lets the requesting browser decrypt your message history. Do not share it. If you did not request this, secure your account.`,
+        };
+  return brandedEmail(webOrigin, copy, locale, { otp: code });
+}
+
 const ACTION_LABELS = {
   verify: {
     en: "Verify my email address",

@@ -85,6 +85,7 @@ const reportInput = z.discriminatedUnion("targetType", [
   z.object({
     targetType: z.literal("message"),
     targetId: z.uuid(),
+    disclosure: z.string().min(1).max(32768).optional(),
     // A message is content: it reports with the post reason set (every code
     // of which the report table's union check already accepts). The
     // account-shaped codes — impersonation, underage — belong to a user
@@ -173,7 +174,11 @@ export const moderationRouter = {
             message: "The thing you reported doesn't exist.",
           });
         }
-        const snapshot = await buildMessageReportSnapshot(context.db, input.targetId);
+        const snapshot = await buildMessageReportSnapshot(
+          context.db,
+          input.targetId,
+          input.disclosure,
+        );
         if (!snapshot) {
           // The message vanished between the two reads; there is nothing left
           // to snapshot, so it reads as missing exactly like a deleted post.

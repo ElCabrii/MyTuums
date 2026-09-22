@@ -103,7 +103,8 @@
     "drizzle-orm": "^0.45.2",
     "sharp": "^0.35.4",
     "undici": "^7.29.0",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "@my-tuums/message-crypto": "workspace:*"
   },
   "devDependencies": {
     "@better-auth/utils": "catalog:",

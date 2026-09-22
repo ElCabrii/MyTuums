@@ -1,3 +1,6 @@
+import { decryptMessage, encryptMessage, envelopeSchema } from "@my-tuums/message-crypto";
+import { messageAccessAtom } from "@/atoms/message-access";
+import { m } from "@/paraglide/messages.js";
 import type { QueryClient } from "@tanstack/react-query";
 import { atomFamily } from "jotai-family";
 import {
@@ -6,7 +9,7 @@ import {
   atomWithQuery,
   queryClientAtom,
 } from "jotai-tanstack-query";
-import { orpc } from "@/lib/orpc";
+import { client, orpc } from "@/lib/orpc";
 import type { ConversationItem, MessageItem, MessageRequestItem, SentMessage } from "@/lib/orpc";
 import { protectedProductReadyAtom } from "@/atoms/query-readiness";
 import { viewerIdAtom } from "@/atoms/session";
@@ -54,10 +57,45 @@ export const messagesUnreadAtom = atomWithQuery((get) => ({
  * `atoms/session-teardown.ts`).
  */
 export const messageThreadFamily = atomFamily((conversationId: string) =>
-  atomWithInfiniteQuery((get) => ({
-    ...messageThreadQueryOptions(conversationId),
-    enabled: get(protectedProductReadyAtom),
-  })),
+  atomWithInfiniteQuery((get) => {
+    const local = get(messageAccessAtom).data?.local;
+    return {
+      ...messageThreadQueryOptions(conversationId),
+      enabled: get(protectedProductReadyAtom) && !!local,
+      queryFn: async ({ pageParam }: { pageParam: string | undefined }) => {
+        if (!local) throw new Error("Message keys are locked.");
+        const page = await client.message.thread({
+          conversationId,
+          cursor: pageParam,
+        });
+        const other = await client.messageKey.identity({ userId: page.user.id });
+        const items: Array<MessageItem & { envelope: string | null }> = await Promise.all(
+          page.items.map(async (item) => {
+            if (!item.envelope || item.deletedAt) return item;
+            const sender = item.senderId === local.public.userId ? local.public : other;
+            try {
+              if (!sender) throw new Error("Sender identity is unavailable.");
+              const decrypted = await decryptMessage(
+                envelopeSchema.parse(JSON.parse(item.envelope)),
+                local,
+                sender,
+                {
+                  id: item.id,
+                  senderId: item.senderId,
+                  recipientId:
+                    item.senderId === local.public.userId ? page.user.id : local.public.userId,
+                },
+              );
+              return { ...item, body: decrypted.message.body, disclosure: decrypted.disclosure };
+            } catch {
+              return { ...item, body: null, decryptionFailed: true };
+            }
+          }),
+        );
+        return { ...page, items };
+      },
+    };
+  }),
 );
 
 /** Drops every thread this family created — called from `clearViewerState`. */
@@ -132,7 +170,7 @@ export function seedFirstMessageThread(
         lastReadAt: null,
         hidden: false,
         user,
-        items: [{ ...message, deletedAt: null }],
+        items: [{ ...message, envelope: message.envelope ?? null, deletedAt: null }],
         nextCursor: null,
       },
     ],
@@ -195,7 +233,23 @@ export const sendMessageAtom = atomWithMutation<
   const viewerId = get(viewerIdAtom);
 
   return {
-    ...orpc.message.send.mutationOptions(),
+    mutationFn: async ({ recipientId, body }: SendVariables): Promise<SentMessage> => {
+      const local = get(messageAccessAtom).data?.local;
+      if (!local || local.public.userId !== get(viewerIdAtom))
+        throw new Error(m.messages_encryption_error());
+      const recipient = await client.messageKey.identity({ userId: recipientId });
+      if (!recipient) throw new Error(m.messages_recipient_not_ready());
+      const id = crypto.randomUUID();
+      const envelope = await encryptMessage(
+        { version: 1, id, senderId: local.public.userId, recipientId, body },
+        local,
+        recipient,
+      );
+      if (local.public.userId !== get(viewerIdAtom)) throw new Error(m.messages_encryption_error());
+      const sent = await client.message.send({ id, recipientId, envelope });
+      if (local.public.userId !== get(viewerIdAtom)) throw new Error(m.messages_encryption_error());
+      return { ...sent, body };
+    },
     onMutate: ({ conversationId, body }) => {
       if (!conversationId || !viewerId) return { snapshot: undefined };
       const key = threadKeyOf(conversationId);
@@ -231,9 +285,11 @@ export const sendMessageAtom = atomWithMutation<
       return { snapshot };
     },
     onError: (_error, _variables, context) => {
-      restoreSnapshot(queryClient, context?.snapshot);
+      if (viewerId && get(viewerIdAtom) === viewerId)
+        restoreSnapshot(queryClient, context?.snapshot);
     },
     onSuccess: (message) => {
+      if (!viewerId || get(viewerIdAtom) !== viewerId) return;
       const key = threadKeyOf(message.conversationId);
       queryClient.setQueriesData<ThreadCache>({ queryKey: key }, (data) =>
         data

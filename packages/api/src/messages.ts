@@ -1,3 +1,8 @@
+import {
+  envelopeSchema,
+  identitySchema,
+  validateEnvelopeRecipients,
+} from "@my-tuums/message-crypto";
 import { ORPCError } from "@orpc/server";
 import { and, desc, eq, isNull, ne, not, sql, type SQLWrapper } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -8,12 +13,12 @@ import {
   conversationParticipant,
   follow,
   message,
+  messageIdentity,
   user,
   userBlock,
 } from "@my-tuums/db/schema";
 import {
   CURSOR_MAX_ENCODED_LENGTH,
-  MESSAGE_BODY_MAX_LENGTH,
   MESSAGE_PAGE_SIZE,
   MESSAGE_PAGE_SIZE_MAX,
 } from "./constants.js";
@@ -26,7 +31,7 @@ import { effectivelyBanned } from "./visibility.js";
 
 /**
  * The private-message surface (issue #408): one conversation per pair of
- * users, plain-text messages, message requests as the anti-spam gate, and a
+ * users, encrypted messages with read-only legacy plaintext, message requests as the anti-spam gate, and a
  * per-participant read cursor.
  *
  * Every write here re-checks its eligibility inside the same D1 batch it
@@ -109,15 +114,26 @@ function otherParticipant() {
 async function lastMessagePreviews(
   db: Database,
   conversationIds: string[],
-): Promise<Map<string, { senderId: string; body: string | null; createdAt: Date }>> {
-  const previews = new Map<string, { senderId: string; body: string | null; createdAt: Date }>();
+): Promise<
+  Map<string, { senderId: string; body: string | null; createdAt: Date; encrypted: boolean }>
+> {
+  const previews = new Map<
+    string,
+    { senderId: string; body: string | null; createdAt: Date; encrypted: boolean }
+  >();
   if (conversationIds.length === 0) return previews;
   const probe = (conversationId: string) =>
     db
       .select({
+        encrypted:
+          sql<boolean>`${message.envelope} is not null and ${message.deletedAt} is null`.mapWith(
+            Boolean,
+          ),
         conversationId: message.conversationId,
         senderId: message.senderId,
-        body: sql<string | null>`case when ${message.deletedAt} is null then ${message.body} end`,
+        body: sql<
+          string | null
+        >`case when ${message.deletedAt} is null and ${message.envelope} is null then ${message.body} end`,
         createdAt: message.createdAt,
       })
       .from(message)
@@ -130,7 +146,13 @@ async function lastMessagePreviews(
   const pages = await db.batch([probe(firstId), ...restIds.map(probe)]);
   for (const page of pages) {
     const row = page[0];
-    if (row) previews.set(row.conversationId, row);
+    if (row)
+      previews.set(row.conversationId, {
+        senderId: row.senderId,
+        body: row.body,
+        createdAt: row.createdAt,
+        encrypted: row.encrypted,
+      });
   }
   return previews;
 }
@@ -161,9 +183,10 @@ export const messageRouter = {
   send: protectedProcedure
     .use(rateLimit(RATE_LIMITS.messageSend))
     .input(
-      z.object({
-        recipientId: z.string().min(1),
-        body: z.string().trim().min(1).max(MESSAGE_BODY_MAX_LENGTH),
+      z.strictObject({
+        id: z.uuid(),
+        recipientId: z.string().min(1).max(128),
+        envelope: envelopeSchema,
       }),
     )
     .handler(async ({ input, context }) => {
@@ -196,10 +219,48 @@ export const messageRouter = {
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
       }
 
+      const identities = await context.db
+        .select({ userId: messageIdentity.userId, publicIdentity: messageIdentity.publicIdentity })
+        .from(messageIdentity)
+        .where(sql`${messageIdentity.userId} in (${senderId}, ${input.recipientId})`);
+      const senderIdentity = identities.find((entry) => entry.userId === senderId);
+      const recipientIdentity = identities.find((entry) => entry.userId === input.recipientId);
+      if (!senderIdentity || !recipientIdentity)
+        throw new ORPCError("PRECONDITION_FAILED", {
+          message: "Both people must enable encrypted messaging first.",
+        });
+      try {
+        await validateEnvelopeRecipients(
+          input.envelope,
+          identitySchema.parse(JSON.parse(senderIdentity.publicIdentity)),
+          identitySchema.parse(JSON.parse(recipientIdentity.publicIdentity)),
+        );
+      } catch {
+        throw new ORPCError("BAD_REQUEST", { message: "Invalid encrypted message recipients." });
+      }
+      const envelope = JSON.stringify(input.envelope);
+      if (envelope.length > 32768) throw new ORPCError("BAD_REQUEST");
+      const [existing] = await context.db
+        .select()
+        .from(message)
+        .where(eq(message.id, input.id))
+        .limit(1);
+      if (existing) {
+        if (existing.senderId !== senderId || existing.envelope !== envelope)
+          throw new ORPCError("CONFLICT");
+        return {
+          id: existing.id,
+          conversationId: existing.conversationId,
+          senderId,
+          createdAt: existing.createdAt,
+          body: null,
+          envelope,
+        };
+      }
       const [userAId, userBId] = pairOf(senderId, input.recipientId);
       const eligible = sendEligibility(senderId, input.recipientId);
       const conversationId = crypto.randomUUID();
-      const messageId = crypto.randomUUID();
+      const messageId = input.id;
       const pairRow = sql`from ${conversation} c
         where c.user_a_id = ${userAId} and c.user_b_id = ${userBId} and ${eligible}`;
 
@@ -243,9 +304,10 @@ export const messageRouter = {
         context.db
           .insert(message)
           .select(
-            sql`select ${messageId}, c.id, ${senderId}, ${input.body},
+            sql`select ${messageId}, c.id, ${senderId}, '[encrypted]', ${envelope},
               max(cast(unixepoch('subsec') * 1000 as integer), c.last_message_at + 1), null ${pairRow}`,
           )
+          .onConflictDoNothing()
           .returning({
             id: message.id,
             conversationId: message.conversationId,
@@ -257,7 +319,7 @@ export const messageRouter = {
         context.db
           .update(conversation)
           .set({
-            lastMessageAt: sql`(select m.created_at from ${message} m where m.id = ${messageId})`,
+            lastMessageAt: sql`max(${conversation.lastMessageAt}, (select m.created_at from ${message} m where m.id = ${messageId}))`,
           })
           .where(
             and(
@@ -271,6 +333,23 @@ export const messageRouter = {
 
       const sent = inserted[0];
       if (!sent) {
+        const [duplicate] = await context.db
+          .select()
+          .from(message)
+          .where(eq(message.id, input.id))
+          .limit(1);
+        if (duplicate) {
+          if (duplicate.senderId !== senderId || duplicate.envelope !== envelope)
+            throw new ORPCError("CONFLICT");
+          return {
+            id: duplicate.id,
+            conversationId: duplicate.conversationId,
+            senderId,
+            createdAt: duplicate.createdAt,
+            body: null,
+            envelope,
+          };
+        }
         // Eligibility flipped between the pre-read and the batch (a block
         // landed, the recipient vanished). Nothing was written.
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
@@ -286,7 +365,7 @@ export const messageRouter = {
           conversationId: sent.conversationId,
         }),
       ]);
-      return { ...sent, body: input.body };
+      return { ...sent, body: null, envelope };
     }),
 
   /**
@@ -494,7 +573,12 @@ export const messageRouter = {
       const selection = {
         id: message.id,
         senderId: message.senderId,
-        body: sql<string | null>`case when ${message.deletedAt} is null then ${message.body} end`,
+        body: sql<
+          string | null
+        >`case when ${message.deletedAt} is null and ${message.envelope} is null then ${message.body} end`,
+        envelope: sql<
+          string | null
+        >`case when ${message.deletedAt} is null then ${message.envelope} end`,
         createdAt: message.createdAt,
         deletedAt: message.deletedAt,
       };

@@ -80,6 +80,31 @@ describe("AnalyticsConsent", () => {
     expect(analytics.stop).toHaveBeenCalledWith();
   });
 
+  it.each(["/messages", "/messages/private-conversation-id", "/messages/new/private-recipient-id"])(
+    "excludes %s from analytics even with consent, then resumes on public pages",
+    async (initialPath) => {
+      const analytics = analyticsDouble();
+      const store = createStore();
+      store.set(analyticsConsentAtom, "granted");
+      const rendered = await renderWithProviders(
+        <AnalyticsConsent analytics={analytics} enabled />,
+        {
+          initialPath,
+          store,
+        },
+      );
+      await waitFor(() => expect(analytics.start).toHaveBeenCalled());
+      expect(analytics.trackPageView).not.toHaveBeenCalled();
+      await act(async () => {
+        await rendered.router.navigate({ to: "/privacy" });
+      });
+      await waitFor(() => expect(analytics.trackPageView).toHaveBeenCalledTimes(1));
+      expect(analytics.trackPageView.mock.calls[0]?.[0]?.location).toBe(
+        new URL("/privacy", window.location.origin).href,
+      );
+    },
+  );
+
   it("strips query and hash from the tracked page location (issue #345)", async () => {
     const analytics = analyticsDouble();
     const user = userEvent.setup();

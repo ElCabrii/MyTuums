@@ -14,6 +14,7 @@ imports them.
 
 ```
 apps/web ──▶ packages/api, packages/auth (browser-safe subpaths only)
+         └─▶ packages/message-crypto ◀── packages/api
 apps/server ──▶ packages/api ──▶ packages/auth ──▶ packages/db
             └─▶ packages/auth ─────────────────────┘
             └─▶ packages/db
@@ -124,7 +125,9 @@ authorizes the app session itself (like `/media`), then proxies the user's
 live SSE connections (bounded, keep-alive pings, lifetime-bounded so a revoked
 session reauthorizes on reconnect). Events are thin invalidation notices;
 every payload comes back from D1-backed procedures, and D1 remains the single
-source of truth (issue #408).
+source of truth (issue #408). New message bodies are encrypted in the browser;
+D1 stores envelopes, while an application Worker secret enables email recovery.
+See [recoverable encryption and its trust boundary](message-encryption.md).
 
 ## oRPC context
 
@@ -147,6 +150,7 @@ The router's top-level groups:
 - `game` — `bySlug`, `list` (public: the `/games` directory, issue #314)
 - `search` — `typeahead`, `users`, `posts`
 - `notification` — `list`, `unreadCount`, `markRead`
+- `messageKey` — public identities, encryption setup and session-bound email recovery
 - `message` — `send`, `conversations`, `requests`, `thread`, `accept`, `decline`, `hide`, `markRead`, `unreadCount`, `deleteMessage`, `conversationWith` (private messages, issue #408)
 - `moderation` — reports, blocks, the queue, the staff actions, the audit log, appeals
 

@@ -1,6 +1,15 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
-import { conversationParticipant, message, report, user } from "@my-tuums/db/schema";
+import {
+  conversation,
+  conversationParticipant,
+  message,
+  messageIdentity,
+  report,
+  user,
+} from "@my-tuums/db/schema";
+import { identitySchema, verifyDisclosedMessage } from "@my-tuums/message-crypto";
+import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 
 /**
@@ -41,7 +50,8 @@ export const messageReportSnapshot = z.object({
 export type MessageReportSnapshot = z.infer<typeof messageReportSnapshot>;
 
 /**
- * Builds the snapshot for one message: the message itself plus up to
+ * Encrypted reports contain only the participant-disclosed, signature-verified
+ * message. Legacy reports contain the message itself plus up to
  * `MESSAGE_REPORT_CONTEXT` messages before it in the thread's keyset order,
  * reversed to reading order (oldest first) so the case view renders the
  * exchange top-down. Null when the message does not exist.
@@ -52,13 +62,62 @@ export type MessageReportSnapshot = z.infer<typeof messageReportSnapshot>;
 export async function buildMessageReportSnapshot(
   db: Database,
   messageId: string,
+  disclosure?: string,
 ): Promise<MessageReportSnapshot | null> {
   const [target] = await db
-    .select({ conversationId: message.conversationId, createdAt: message.createdAt })
+    .select({
+      conversationId: message.conversationId,
+      createdAt: message.createdAt,
+      envelope: message.envelope,
+      senderId: message.senderId,
+    })
     .from(message)
     .where(eq(message.id, messageId))
     .limit(1);
   if (!target) return null;
+
+  if (target.envelope !== null) {
+    if (!disclosure)
+      throw new ORPCError("BAD_REQUEST", {
+        message: "Choose the message text to disclose with this report.",
+      });
+    const [sender] = await db
+      .select({ identity: messageIdentity.publicIdentity, handle: user.username })
+      .from(messageIdentity)
+      .innerJoin(user, eq(user.id, messageIdentity.userId))
+      .where(eq(messageIdentity.userId, target.senderId))
+      .limit(1);
+    const [pair] = await db
+      .select()
+      .from(conversation)
+      .where(eq(conversation.id, target.conversationId))
+      .limit(1);
+    if (!sender || !pair) return null;
+    try {
+      const verified = await verifyDisclosedMessage(
+        disclosure,
+        identitySchema.parse(JSON.parse(sender.identity)),
+      );
+      const recipientId = pair.userAId === target.senderId ? pair.userBId : pair.userAId;
+      if (verified.id !== messageId || verified.recipientId !== recipientId)
+        throw new Error("Incorrect report target.");
+      return {
+        version: 1,
+        reportedMessageId: messageId,
+        messages: [
+          {
+            id: messageId,
+            senderId: target.senderId,
+            senderHandle: sender.handle,
+            body: verified.body,
+            createdAt: target.createdAt.toISOString(),
+          },
+        ],
+      };
+    } catch {
+      throw new ORPCError("BAD_REQUEST", { message: "Message evidence could not be verified." });
+    }
+  }
 
   const rows = await db
     .select({
@@ -73,6 +132,7 @@ export async function buildMessageReportSnapshot(
     .where(
       and(
         eq(message.conversationId, target.conversationId),
+        isNull(message.envelope),
         sql`(${message.createdAt}, ${message.id}) <= (${sql.param(target.createdAt, message.createdAt)}, ${messageId})`,
       ),
     )

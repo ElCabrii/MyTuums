@@ -241,3 +241,7 @@ offline converter with the production Railway environment UUID and
 The command name remains compatible with the completed preview migration.
 See [production execution](../../docs/cloudflare-production-migration.md) for
 resource identities, backups and cutover gates.
+
+## Recoverable messages
+
+Messaging migration 0008 adds encrypted envelopes, immutable account identity backups and session/email-bound recovery challenges. Custom migration 0009 forbids new plaintext inserts and body/envelope updates, preserving legacy reads and tombstones. Do not drop these triggers during table rebuilds or server rollback. See [encryption storage and rollout](../../docs/message-encryption.md).

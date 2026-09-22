@@ -111,7 +111,7 @@ Cloudflare consent-purpose gate; the app's six-month consent decision is the
 single gate. The app strips query strings before it emits the event, and its
 consent controller is the only code allowed to emit `MyTuumsPageview`.
 
-Runtime secrets include authentication, OAuth, Stream, IGDB and appeal-signing
+Runtime secrets include authentication, OAuth, Stream, IGDB, message-recovery and appeal-signing
 credentials. The app and jobs Workers share the same independently generated
 `APPEAL_TOKEN_SECRET`; `BETTER_AUTH_SECRET` stays app-only. Changing a runtime
 secret cannot alter values already baked into the browser bundle.
@@ -223,3 +223,11 @@ Retain exports and recovery artifacts outside the repository because they can
 contain sessions and verification capabilities. D1 recovery does not restore
 R2 objects, Stream videos, Workflow history or Durable Object state; coordinate
 those systems before allowing writes to a restored database.
+
+## Message recovery custody
+
+`MESSAGE_RECOVERY_KEYRING` is a separate application Worker secret, required
+for messaging setup and email recovery. Each environment needs its own keyring
+and secure backup. Read [generation, rotation and rollout instructions](message-encryption.md#deployment-and-recovery-key-custody)
+before deployment. Migrations 0008/0009 preserve legacy messages but permanently
+refuse new plaintext writes; an older Worker cannot restore plaintext sending.

@@ -848,3 +848,7 @@ throughout on purpose.
 - [docs/architecture.md](../../docs/architecture.md) — context, media and moderation flows.
 - [docs/security.md](../../docs/security.md) — the anonymous surface, rate-limit keys, privacy projection.
 - [docs/product.md](../../docs/product.md) — the vocabulary these procedures implement.
+
+## Recoverable messages
+
+`src/message-keys.ts` owns messaging identity registration and session-bound email recovery; `src/message-recovery-keys.ts` owns the injected provider keyring. New sends accept encrypted envelopes only; reports verify participant-disclosed signed plaintext. See [recoverable message encryption](../../docs/message-encryption.md) for the trust boundary and tests.

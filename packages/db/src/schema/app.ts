@@ -1264,6 +1264,7 @@ export const message = sqliteTable(
     // UTF-16 units, so a zod-checked 2000-unit string is always within this
     // bound — never longer.
     body: text("body").notNull(),
+    envelope: text("envelope"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
       .notNull(),
@@ -1276,6 +1277,33 @@ export const message = sqliteTable(
     index("message_conversation_created_idx").on(t.conversationId, desc(t.createdAt), desc(t.id)),
   ],
 );
+
+/** Immutable account identity and its provider-recoverable encrypted private-key backup. */
+export const messageIdentity = sqliteTable("message_identity", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  publicIdentity: text("public_identity").notNull(),
+  backup: text("backup").notNull(),
+  recoveryKeyId: text("recovery_key_id").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+    .notNull(),
+});
+
+/** At most one short-lived, session-bound recovery challenge per account; no email code is stored. */
+export const messageRecovery = sqliteTable("message_recovery", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  id: text("id").notNull(),
+  sessionId: text("session_id").notNull(),
+  email: text("email").notNull(),
+  codeHash: text("code_hash").notNull(),
+  transportKey: text("transport_key").notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  attempts: integer("attempts").notNull().default(0),
+});
 
 /**
  * A resolved link preview card, keyed by the normalized URL it describes

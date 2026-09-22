@@ -11,6 +11,19 @@ import { createInMemoryStorage } from "./memory-storage";
 installTestAuthFixture();
 
 /**
+ * jsdom supplies its own Uint8Array realm but uses Node's TextEncoder.
+ * JOSE checks payload instanceof Uint8Array, so encoder output must belong
+ * to the same realm as the browser code under test. Real browsers already
+ * satisfy this; keep the compatibility shim confined to the DOM harness.
+ */
+class BrowserTextEncoder extends TextEncoder {
+  override encode(input?: string): Uint8Array<ArrayBuffer> {
+    return new Uint8Array(super.encode(input));
+  }
+}
+globalThis.TextEncoder = BrowserTextEncoder;
+
+/**
  * Node >= 22 ships its own `localStorage` global, which is `undefined` unless
  * the process was started with `--localstorage-file`. Under jsdom `window`
  * *is* `globalThis`, so that undefined global shadows the working

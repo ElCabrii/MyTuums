@@ -1,6 +1,7 @@
 /** Application Worker surface: no legacy S3 delivery, Sharp or background worker entrypoints. */
 export { appRouter, type AppRouter } from "./router.js";
 export { createContext, type ApiServices, type Context } from "./context.js";
+export { createMessageRecoveryKeys } from "./message-recovery-keys.js";
 export { createAppealTokenSigner } from "./appeal-token.js";
 export { createR2Storage } from "./r2-storage.js";
 export { createVideoUploads } from "./video-uploads.js";
