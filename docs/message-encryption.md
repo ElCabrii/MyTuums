@@ -86,7 +86,10 @@ remain necessary.
 
 Encrypted-message reports deliberately disclose the selected signed
 plaintext and that message’s attachments to moderation. The server verifies sender signature, message ID and
-recipient before storing the report snapshot. The report dialog explains this
+recipient before storing the report snapshot. If a caption cannot be decrypted,
+participants can report its stored attachments alone: the snapshot contains no
+text and no neighboring messages. Supplied but invalid signatures are still
+rejected; attachment-only reports cannot introduce unverified text. The report dialog explains this
 disclosure. Moderators have no conversation-browsing endpoint. Already disclosed
 reports remain plaintext evidence after message deletion. The UI cannot report
 an encrypted tombstone whose plaintext is no longer available to that browser.

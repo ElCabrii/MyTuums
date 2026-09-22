@@ -18,8 +18,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { reasonLabel } from "@/components/moderation/labels";
+import { MessageAttachments } from "@/components/message-attachments";
 import { PostAttachmentGrid } from "@/components/post-attachment-grid";
-import type { Post } from "@/lib/orpc";
+import type { MessageAttachment, Post } from "@/lib/orpc";
 import { m } from "@/paraglide/messages.js";
 
 /**
@@ -77,9 +78,13 @@ function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
         {target.targetType === "post" && <ReportPreview post={target.post} />}
         {target.targetType === "message" && (
           <>
-            <MessageReportPreview body={target.body} />
-            {target.disclosure && (
-              <p className="text-muted-foreground text-sm">{m.messages_report_disclosure()}</p>
+            <MessageReportPreview body={target.body} attachments={target.attachments ?? []} />
+            {(target.disclosure || (target.body === null && !!target.attachments?.length)) && (
+              <p className="text-muted-foreground text-sm">
+                {target.disclosure
+                  ? m.messages_report_disclosure()
+                  : m.messages_report_attachments_only()}
+              </p>
             )}
           </>
         )}
@@ -169,7 +174,13 @@ function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
  * would be a lie about what is gone.
  */
 /** A private message being reported: its text, or the tombstone note. */
-function MessageReportPreview({ body }: { body: string | null }) {
+function MessageReportPreview({
+  body,
+  attachments,
+}: {
+  body: string | null;
+  attachments: MessageAttachment[];
+}) {
   return (
     <div className="border-border/60 bg-muted/30 space-y-2 rounded-lg border p-3 text-left">
       <p className="text-muted-foreground text-xs font-medium">
@@ -179,9 +190,10 @@ function MessageReportPreview({ body }: { body: string | null }) {
         <p className="text-foreground/90 text-sm leading-relaxed break-words whitespace-pre-line">
           {body}
         </p>
-      ) : (
+      ) : attachments.length === 0 ? (
         <p className="text-muted-foreground text-sm italic">{m.messages_tombstone()}</p>
-      )}
+      ) : null}
+      <MessageAttachments attachments={attachments} mine={false} />
     </div>
   );
 }

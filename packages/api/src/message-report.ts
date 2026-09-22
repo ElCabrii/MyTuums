@@ -106,55 +106,62 @@ export async function buildMessageReportSnapshot(
       createdAt: message.createdAt,
       envelope: message.envelope,
       senderId: message.senderId,
+      senderHandle: user.username,
       attachments: messageAttachmentsSelection(true),
     })
     .from(message)
+    .innerJoin(user, eq(user.id, message.senderId))
     .where(eq(message.id, messageId))
     .limit(1);
   if (!target) return null;
 
   if (target.envelope !== null) {
-    if (!disclosure)
+    if (!disclosure && target.attachments.length === 0)
       throw new ORPCError("BAD_REQUEST", {
         message: "Choose the message text to disclose with this report.",
       });
-    const [sender] = await db
-      .select({ identity: messageIdentity.publicIdentity, handle: user.username })
-      .from(messageIdentity)
-      .innerJoin(user, eq(user.id, messageIdentity.userId))
-      .where(eq(messageIdentity.userId, target.senderId))
-      .limit(1);
-    const [pair] = await db
-      .select()
-      .from(conversation)
-      .where(eq(conversation.id, target.conversationId))
-      .limit(1);
-    if (!sender || !pair) return null;
-    try {
-      const verified = await verifyDisclosedMessage(
-        disclosure,
-        identitySchema.parse(JSON.parse(sender.identity)),
-      );
-      const recipientId = pair.userAId === target.senderId ? pair.userBId : pair.userAId;
-      if (verified.id !== messageId || verified.recipientId !== recipientId)
-        throw new Error("Incorrect report target.");
-      return {
-        version: 2,
-        reportedMessageId: messageId,
-        messages: [
-          {
-            id: messageId,
-            senderId: target.senderId,
-            senderHandle: sender.handle,
-            body: verified.body,
-            attachments: target.attachments,
-            createdAt: target.createdAt.toISOString(),
-          },
-        ],
-      };
-    } catch {
-      throw new ORPCError("BAD_REQUEST", { message: "Message evidence could not be verified." });
+    let body = "";
+    if (disclosure) {
+      const [sender] = await db
+        .select({ identity: messageIdentity.publicIdentity })
+        .from(messageIdentity)
+        .where(eq(messageIdentity.userId, target.senderId))
+        .limit(1);
+      const [pair] = await db
+        .select()
+        .from(conversation)
+        .where(eq(conversation.id, target.conversationId))
+        .limit(1);
+      if (!sender || !pair) return null;
+      try {
+        const verified = await verifyDisclosedMessage(
+          disclosure,
+          identitySchema.parse(JSON.parse(sender.identity)),
+        );
+        const recipientId = pair.userAId === target.senderId ? pair.userBId : pair.userAId;
+        if (verified.id !== messageId || verified.recipientId !== recipientId)
+          throw new Error("Incorrect report target.");
+        body = verified.body;
+      } catch {
+        throw new ORPCError("BAD_REQUEST", { message: "Message evidence could not be verified." });
+      }
     }
+    // Without signed text, only this message's server-owned attachments are
+    // evidence. A corrupt caption must not make its visible media unreportable.
+    return {
+      version: 2,
+      reportedMessageId: messageId,
+      messages: [
+        {
+          id: messageId,
+          senderId: target.senderId,
+          senderHandle: target.senderHandle,
+          body,
+          attachments: target.attachments,
+          createdAt: target.createdAt.toISOString(),
+        },
+      ],
+    };
   }
 
   const rows = await db

@@ -1043,5 +1043,6 @@
   "messages_recipient_not_ready": "This person needs to enable encrypted messaging before you can send them a message.",
   "messages_report_disclosure": "Sending this report shares the selected message’s decrypted text and attachments with moderators. Other encrypted messages stay private.",
   "messages_encryption_notice": "Text encrypted • Media accessible to MyTuums • History recoverable",
+  "messages_report_attachments_only": "This report shares only this message’s attachments with moderators. Its encrypted text could not be read and will not be included.",
   "messages_attachment_remove": "Remove attachment"
 }

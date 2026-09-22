@@ -123,13 +123,23 @@ function otherParticipant() {
   return alias(conversationParticipant, "other_participant");
 }
 
-async function readMessageAttachments(db: Database, id: string) {
+/** Resolve retries only from committed state, including the winning request's attachments. */
+async function readSentMessage(db: Database, id: string, senderId: string, envelope: string) {
   const [row] = await db
-    .select({ attachments: messageAttachmentsSelection() })
+    .select({
+      id: message.id,
+      conversationId: message.conversationId,
+      senderId: message.senderId,
+      createdAt: message.createdAt,
+      envelope: message.envelope,
+      attachments: messageAttachmentsSelection(),
+    })
     .from(message)
     .where(eq(message.id, id))
     .limit(1);
-  return row?.attachments ?? [];
+  if (!row) return null;
+  if (row.senderId !== senderId || row.envelope !== envelope) throw new ORPCError("CONFLICT");
+  return { ...row, body: null, envelope };
 }
 
 /**
@@ -321,24 +331,8 @@ export const messageRouter = {
       }
       const envelope = JSON.stringify(input.envelope);
       if (envelope.length > 32768) throw new ORPCError("BAD_REQUEST");
-      const [existing] = await context.db
-        .select()
-        .from(message)
-        .where(eq(message.id, input.id))
-        .limit(1);
-      if (existing) {
-        if (existing.senderId !== senderId || existing.envelope !== envelope)
-          throw new ORPCError("CONFLICT");
-        return {
-          id: existing.id,
-          conversationId: existing.conversationId,
-          senderId,
-          createdAt: existing.createdAt,
-          body: null,
-          envelope,
-          attachments: await readMessageAttachments(context.db, existing.id),
-        };
-      }
+      const existing = await readSentMessage(context.db, input.id, senderId, envelope);
+      if (existing) return existing;
       // Media preparation reads and validates every byte BEFORE anything is
       // written; a refusal here leaves no record anywhere. Images and voice
       // ride this RPC (the caps above keep the body inside the RPC ceiling);
@@ -405,6 +399,9 @@ export const messageRouter = {
           .where(and(eq(video.id, input.videoId), eq(video.authorId, senderId)))
           .limit(1);
         if (!row || row.state !== "uploaded" || row.expiresAt.getTime() <= Date.now()) {
+          // The winning retry may have queued this video after our first read.
+          const duplicate = await readSentMessage(context.db, input.id, senderId, envelope);
+          if (duplicate) return duplicate;
           throw new ORPCError("BAD_REQUEST", {
             message: "That video is no longer available. Upload it again.",
           });
@@ -486,161 +483,161 @@ export const messageRouter = {
               where m.id = ${messageId} and m.sender_id = ${senderId}`,
         );
 
-      const [, , , inserted] = await context.db.batch([
-        // Seed the pair's conversation; the loser of a concurrent first-send
-        // race is a no-op on the unique pair key and every later statement
-        // resolves the winner's row by the pair, so both sends land together.
-        context.db
-          .insert(conversation)
-          .select(
-            sql`select ${conversationId}, ${userAId}, ${userBId},
+      let sent: Pick<
+        typeof message.$inferSelect,
+        "id" | "conversationId" | "senderId" | "createdAt"
+      >;
+      try {
+        const [, , , inserted] = await context.db.batch([
+          // Seed the pair's conversation; the loser of a concurrent first-send
+          // race is a no-op on the unique pair key and every later statement
+          // resolves the winner's row by the pair, so both sends land together.
+          context.db
+            .insert(conversation)
+            .select(
+              sql`select ${conversationId}, ${userAId}, ${userBId},
               cast(unixepoch('subsec') * 1000 as integer),
               cast(unixepoch('subsec') * 1000 as integer)
               where ${eligible}`,
-          )
-          .onConflictDoNothing(),
-        context.db
-          .insert(conversationParticipant)
-          .select(
-            sql`select c.id, ${senderId}, 'active', null, cast(unixepoch('subsec') * 1000 as integer) ${pairRow}`,
-          )
-          .onConflictDoUpdate({
-            target: [conversationParticipant.conversationId, conversationParticipant.userId],
-            // Replying is the implicit accept of the sender's own side.
-            set: { status: "active" },
-          }),
-        context.db
-          .insert(conversationParticipant)
-          .select(
-            sql`select c.id, ${input.recipientId}, ${recipientStatus}, null, cast(unixepoch('subsec') * 1000 as integer) ${pairRow}`,
-          )
-          .onConflictDoNothing(),
-        context.db
-          .insert(message)
-          .select(
-            sql`select ${messageId}, c.id, ${senderId}, '[encrypted]', ${envelope},
-              max(cast(unixepoch('subsec') * 1000 as integer), c.last_message_at + 1), null ${pairRow}`,
-          )
-          .returning({
-            id: message.id,
-            conversationId: message.conversationId,
-            senderId: message.senderId,
-            createdAt: message.createdAt,
-          }),
-        // The ordering cursor advances to exactly the message's timestamp,
-        // and only because the message landed in this conversation.
-        context.db
-          .update(conversation)
-          .set({
-            lastMessageAt: sql`max(${conversation.lastMessageAt}, (select m.created_at from ${message} m where m.id = ${messageId}))`,
-          })
-          .where(
-            and(
-              eq(conversation.userAId, userAId),
-              eq(conversation.userBId, userBId),
-              sql`exists (select 1 from ${message}
+            )
+            .onConflictDoNothing(),
+          context.db
+            .insert(conversationParticipant)
+            .select(
+              sql`select c.id, ${senderId}, 'active', null, cast(unixepoch('subsec') * 1000 as integer) ${pairRow}`,
+            )
+            .onConflictDoUpdate({
+              target: [conversationParticipant.conversationId, conversationParticipant.userId],
+              // Replying is the implicit accept of the sender's own side.
+              set: { status: "active" },
+            }),
+          context.db
+            .insert(conversationParticipant)
+            .select(
+              sql`select c.id, ${input.recipientId}, ${recipientStatus}, null, cast(unixepoch('subsec') * 1000 as integer) ${pairRow}`,
+            )
+            .onConflictDoNothing(),
+          // A duplicate must hit the unique constraint even if eligibility
+          // changed after the pre-read. Otherwise a skipped insert could let
+          // later attachment writes mutate the winning request's message.
+          context.db
+            .insert(message)
+            .select(
+              sql`select ${messageId}, c.id, ${senderId}, '[encrypted]', ${envelope},
+              max(cast(unixepoch('subsec') * 1000 as integer), c.last_message_at + 1), null
+              from ${conversation} c
+              where c.id = (select m.conversation_id from ${message} m where m.id = ${messageId})
+                or (c.user_a_id = ${userAId} and c.user_b_id = ${userBId} and ${eligible})`,
+            )
+            .returning({
+              id: message.id,
+              conversationId: message.conversationId,
+              senderId: message.senderId,
+              createdAt: message.createdAt,
+            }),
+          // The ordering cursor advances to exactly the message's timestamp,
+          // and only because the message landed in this conversation.
+          context.db
+            .update(conversation)
+            .set({
+              lastMessageAt: sql`max(${conversation.lastMessageAt}, (select m.created_at from ${message} m where m.id = ${messageId}))`,
+            })
+            .where(
+              and(
+                eq(conversation.userAId, userAId),
+                eq(conversation.userBId, userBId),
+                sql`exists (select 1 from ${message}
                 where ${message.id} = ${messageId} and ${message.conversationId} = ${conversation.id})`,
+              ),
+            ),
+          // Attachment rows, upload-intent consumption and the video's queueing
+          // land only when the message did.
+          ...stagedImages.map((image, position) =>
+            attachmentInsert(
+              image.attachmentId,
+              position,
+              "image",
+              mediaPathFor(image.key),
+              image.type,
+              image.bytes.byteLength,
+              {
+                width: image.width,
+                height: image.height,
+              },
             ),
           ),
-        // Attachment rows, upload-intent consumption and the video's queueing
-        // land only when the message did.
-        ...stagedImages.map((image, position) =>
-          attachmentInsert(
-            image.attachmentId,
-            position,
-            "image",
-            mediaPathFor(image.key),
-            image.type,
-            image.bytes.byteLength,
-            {
-              width: image.width,
-              height: image.height,
-            },
-          ),
-        ),
-        ...(stagedVoice
-          ? [
-              attachmentInsert(
-                stagedVoice.attachmentId,
-                0,
-                "voice",
-                mediaPathFor(stagedVoice.key),
-                stagedVoice.type,
-                stagedVoice.bytes.byteLength,
-                { durationMs: stagedVoice.durationMs },
-              ),
-            ]
-          : []),
-        ...(uploadId
-          ? [
-              context.db
-                .delete(mediaIntent)
-                .where(
-                  and(
-                    eq(mediaIntent.id, uploadId),
-                    sql`exists (select 1 from ${message} where ${message.id} = ${messageId})`,
-                  ),
+          ...(stagedVoice
+            ? [
+                attachmentInsert(
+                  stagedVoice.attachmentId,
+                  0,
+                  "voice",
+                  mediaPathFor(stagedVoice.key),
+                  stagedVoice.type,
+                  stagedVoice.bytes.byteLength,
+                  { durationMs: stagedVoice.durationMs },
                 ),
-            ]
-          : []),
-        ...(videoRow
-          ? [
-              attachmentInsert(
-                videoAttachmentId,
-                0,
-                "video",
-                messageVideoMediaPath(videoRow.id),
-                "application/vnd.apple.mpegurl",
-                videoRow.byteSize,
-                { videoId: videoRow.id },
-              ),
-              context.db
-                .update(video)
-                .set({
-                  state: "queued",
-                  expiresAt: sql`cast(unixepoch('subsec') * 1000 as integer) + 1800000`,
-                })
-                .where(
-                  and(
-                    eq(video.id, videoRow.id),
-                    eq(video.authorId, senderId),
-                    eq(video.state, "uploaded"),
-                    messageLanded,
+              ]
+            : []),
+          ...(uploadId
+            ? [
+                context.db
+                  .delete(mediaIntent)
+                  .where(
+                    and(
+                      eq(mediaIntent.id, uploadId),
+                      sql`exists (select 1 from ${message} where ${message.id} = ${messageId})`,
+                    ),
                   ),
+              ]
+            : []),
+          ...(videoRow
+            ? [
+                attachmentInsert(
+                  videoAttachmentId,
+                  0,
+                  "video",
+                  messageVideoMediaPath(videoRow.id),
+                  "application/vnd.apple.mpegurl",
+                  videoRow.byteSize,
+                  { videoId: videoRow.id },
                 ),
-              jobIntentInsert(
-                context.db,
-                { id: `video-${videoRow.id}`, kind: "video", entityId: videoRow.id },
-                messageLanded,
-              ),
-            ]
-          : []),
-      ]);
+                context.db
+                  .update(video)
+                  .set({
+                    state: "queued",
+                    expiresAt: sql`cast(unixepoch('subsec') * 1000 as integer) + 1800000`,
+                  })
+                  .where(
+                    and(
+                      eq(video.id, videoRow.id),
+                      eq(video.authorId, senderId),
+                      eq(video.state, "uploaded"),
+                      messageLanded,
+                    ),
+                  ),
+                jobIntentInsert(
+                  context.db,
+                  { id: `video-${videoRow.id}`, kind: "video", entityId: videoRow.id },
+                  messageLanded,
+                ),
+              ]
+            : []),
+        ]);
 
-      const sent = inserted[0];
-      if (!sent) {
-        const [duplicate] = await context.db
-          .select()
-          .from(message)
-          .where(eq(message.id, input.id))
-          .limit(1);
-        if (duplicate) {
-          if (duplicate.senderId !== senderId || duplicate.envelope !== envelope)
-            throw new ORPCError("CONFLICT");
-          return {
-            id: duplicate.id,
-            conversationId: duplicate.conversationId,
-            senderId,
-            createdAt: duplicate.createdAt,
-            body: null,
-            envelope,
-            attachments: await readMessageAttachments(context.db, duplicate.id),
-          };
+        const insertedMessage = inserted[0];
+        if (!insertedMessage) {
+          throw new ORPCError("NOT_FOUND", { message: "No such user." });
         }
-        // Eligibility flipped between the pre-read and the batch (a block
-        // landed, the recipient vanished, the video vanished). Nothing was
-        // written; the objects stay behind the intent for recovery.
-        throw new ORPCError("NOT_FOUND", { message: "No such user." });
+        sent = insertedMessage;
+      } catch (error) {
+        // A concurrent retry can pass the pre-read before its twin commits.
+        // Keep the unique insert: D1 rolls back the entire losing batch, so
+        // attachments and participant changes cannot land a second time.
+        // Its staged objects remain behind their upload intent for cleanup.
+        const duplicate = await readSentMessage(context.db, input.id, senderId, envelope);
+        if (duplicate) return duplicate;
+        throw error;
       }
 
       // Commit first; the Workflow's own recovery owns a missing dispatch.

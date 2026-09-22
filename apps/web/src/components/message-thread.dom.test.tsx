@@ -7,6 +7,7 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { createStore } from "jotai";
+import { reportDialogAtom } from "@/atoms/dialog-targets";
 import { videoDraftAtomFamily } from "@/atoms/video-upload";
 import { useState, type ReactElement } from "react";
 
@@ -641,4 +642,50 @@ it("keeps the caption unsendable until the selected video upload finishes", asyn
   expect(screen.getByRole("button", { name: m.messages_send() })).toBeDisabled();
   act(() => store.set(draftAtom, { ...draft, status: "uploaded" }));
   expect(screen.getByRole("button", { name: m.messages_send() })).toBeEnabled();
+});
+
+it("keeps unreadable encrypted media reportable without offering unreadable text as evidence", async () => {
+  const media = pageMessage({
+    body: null,
+    envelope: "{}",
+    decryptionFailed: true,
+    attachments: [
+      {
+        id: "report-image",
+        kind: "image",
+        url: "/media/messages/report/image.png",
+        contentType: "image/png",
+        byteSize: 100,
+        position: 0,
+        width: 2,
+        height: 2,
+        durationMs: null,
+        video: null,
+      },
+    ],
+  });
+  const textOnly = pageMessage({ body: null, envelope: "{}", decryptionFailed: true });
+  const { queryClient, render } = makePane(<MessageThreadPane conversationId="unreadable" />);
+  seedThread(queryClient, "unreadable", [media, textOnly], null);
+  fakeClient.message.thread.mockResolvedValue({
+    conversationId: "unreadable",
+    lastReadAt: null,
+    hidden: false,
+    user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
+    items: [media, textOnly],
+    nextCursor: null,
+  });
+  const { store } = await render();
+  const { screen } = await import("@testing-library/react");
+  const actions = await screen.findAllByRole("button", {
+    name: m.moderation_report_title_message(),
+  });
+  expect(actions).toHaveLength(1);
+  fireEvent.click(actions[0]);
+  expect(store.get(reportDialogAtom)).toMatchObject({
+    targetType: "message",
+    targetId: media.id,
+    body: null,
+    attachments: media.attachments,
+  });
 });

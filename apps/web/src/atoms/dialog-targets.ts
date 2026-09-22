@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import type { Post } from "@/lib/orpc";
+import type { MessageAttachment, Post } from "@/lib/orpc";
 
 // Keep dialog identities free of runtime mutation and UI imports: the root
 // observes them before any dialog implementation has been requested.
@@ -16,7 +16,13 @@ import type { Post } from "@/lib/orpc";
 export type ReportDialogTarget =
   | { targetType: "post"; targetId: string; post: Post }
   | { targetType: "user"; targetId: string }
-  | { targetType: "message"; targetId: string; body: string | null; disclosure?: string };
+  | {
+      targetType: "message";
+      targetId: string;
+      body: string | null;
+      disclosure?: string;
+      attachments?: MessageAttachment[];
+    };
 
 /** Which report dialog is open: the target being reported, or null. */
 export const reportDialogAtom = atom<ReportDialogTarget | null>(null);

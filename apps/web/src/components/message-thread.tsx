@@ -414,13 +414,16 @@ function MessageScroll({
                 bubble sideways the moment it renders. */}
             <div className="text-muted-foreground ml-1 flex w-7 shrink-0 items-center justify-center self-center opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 motion-reduce:transition-none">
               {mine && item.deletedAt === null && <DeleteOwnAction messageId={item.id} />}
-              {!mine && item.deletedAt === null && !item.decryptionFailed && (
-                <ReportMessageAction
-                  messageId={item.id}
-                  body={item.body}
-                  disclosure={item.disclosure}
-                />
-              )}
+              {!mine &&
+                item.deletedAt === null &&
+                (!item.decryptionFailed || item.attachments.length > 0) && (
+                  <ReportMessageAction
+                    messageId={item.id}
+                    body={item.body}
+                    disclosure={item.disclosure}
+                    attachments={item.attachments}
+                  />
+                )}
             </div>
           </div>
         );
@@ -459,10 +462,12 @@ function ReportMessageAction({
   messageId,
   body,
   disclosure,
+  attachments,
 }: {
   messageId: string;
   body: string | null;
   disclosure?: string;
+  attachments: ThreadItem["attachments"];
 }) {
   const setReport = useSetAtom(reportDialogAtom);
   return (
@@ -476,6 +481,7 @@ function ReportMessageAction({
           targetId: messageId,
           body,
           disclosure,
+          attachments,
         })
       }
       className="hover:text-destructive rounded p-1 transition-colors"

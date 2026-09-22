@@ -38,6 +38,7 @@ import {
   setUserBan,
   setUserRole,
   testStorageObjects,
+  testStorage,
   truncateAll,
   type TestUser,
 } from "./testing/harness.js";
@@ -1219,6 +1220,119 @@ describe("message media attachments", () => {
   const WEBM_BYTES = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x01, 0x02, 0x03, 0x04]);
   const voiceFile = (name = "note.webm", type = "audio/webm"): File =>
     new File([WEBM_BYTES], name, { type });
+
+  it("reports stored media when a corrupt encrypted caption cannot be disclosed", async () => {
+    const sender = await createTestUser();
+    const recipient = await createTestUser();
+    const outsider = await createTestUser();
+    const staff = await createTestUser();
+    await setUserRole(staff.id, "moderator");
+    const input = await sendInput(contextFor(sender), recipient.id, "unreadable caption");
+    input.envelope.ciphertext =
+      (input.envelope.ciphertext[0] === "A" ? "B" : "A") + input.envelope.ciphertext.slice(1);
+    const sent = await call(
+      appRouter.message.send,
+      { ...input, images: [pngFile()] },
+      { context: contextFor(sender) },
+    );
+    const key = sent.attachments[0].url.slice("/media/".length);
+    expect(await canViewMessageMedia(contextFor(staff).db, key, staff.id)).toBe(false);
+    const reportInput = {
+      targetType: "message" as const,
+      targetId: sent.id,
+      reason: "harassment" as const,
+    };
+    await expect(
+      call(appRouter.moderation.report, reportInput, { context: contextFor(outsider) }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      call(
+        appRouter.moderation.report,
+        { ...reportInput, disclosure: "forged" },
+        { context: contextFor(recipient) },
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await call(appRouter.moderation.report, reportInput, { context: contextFor(recipient) });
+    const [row] = await contextFor(recipient)
+      .db.select()
+      .from(report)
+      .where(eq(report.targetId, sent.id));
+    expect(parseMessageReportSnapshot(row.snapshotContent)?.messages).toEqual([
+      {
+        id: sent.id,
+        senderId: sender.id,
+        senderHandle: sender.session.user.username,
+        body: "",
+        createdAt: sent.createdAt.toISOString(),
+        attachments: sent.attachments,
+      },
+    ]);
+    expect(await canViewMessageMedia(contextFor(staff).db, key, staff.id)).toBe(true);
+  });
+
+  it.each([false, true])(
+    "returns one committed message and attachment for concurrent duplicate sends (block after first: %s)",
+    async (blockAfterFirst) => {
+      const sender = await createTestUser();
+      const recipient = await createTestUser();
+      const input = {
+        ...(await sendInput(contextFor(sender), recipient.id, "retry me")),
+        images: [pngFile()],
+      };
+      let releaseUploads: () => void = () => {};
+      const uploads = new Promise<void>((resolve) => {
+        releaseUploads = resolve;
+      });
+      let releaseSecond: () => void = () => {};
+      const secondUpload = new Promise<void>((resolve) => {
+        releaseSecond = resolve;
+      });
+      let uploadsStarted = 0;
+      const context = {
+        ...contextFor(sender),
+        storage: {
+          ...testStorage,
+          async put(...args: Parameters<typeof testStorage.put>) {
+            await testStorage.put(...args);
+            // Both requests have passed the existence check before either batch runs.
+            uploadsStarted += 1;
+            if (uploadsStarted === 2) {
+              releaseUploads();
+              if (blockAfterFirst) await secondUpload;
+            }
+            await uploads;
+          },
+        },
+      };
+      const sends = [
+        call(appRouter.message.send, input, { context }),
+        call(appRouter.message.send, input, { context }),
+      ];
+      await Promise.race(sends);
+      if (blockAfterFirst) {
+        await call(appRouter.moderation.block, { userId: recipient.id }, { context });
+        releaseSecond();
+      }
+      const results = await Promise.all(sends);
+      expect(results[0]).toEqual(results[1]);
+      expect(results[0].attachments).toHaveLength(1);
+      expect(
+        await context.db.select().from(messageTable).where(eq(messageTable.id, input.id)),
+      ).toHaveLength(1);
+      expect(
+        await context.db
+          .select()
+          .from(messageAttachment)
+          .where(eq(messageAttachment.messageId, input.id)),
+      ).toHaveLength(1);
+      if (!blockAfterFirst) {
+        const changed = { ...input, envelope: { ...input.envelope, tag: "A".repeat(22) } };
+        await expect(call(appRouter.message.send, changed, { context })).rejects.toMatchObject({
+          code: "CONFLICT",
+        });
+      }
+    },
+  );
 
   it("sends an image group with a caption: rows, objects, and the thread projection agree", async () => {
     const sender = await createTestUser();
