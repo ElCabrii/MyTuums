@@ -266,10 +266,18 @@ menu; the navigation bar has no standalone theme button.
 
 ## Private messages
 
-One conversation per pair of users, ever — whoever writes first, the thread is
-the same. Anyone signed in can message anyone except themselves and users
-across a block (either direction); private accounts are messageable like
-anyone else.
+One conversation per pair of users, ever — whoever writes first, the
+thread is the same. Anyone signed in can message anyone except themselves and
+users across a block (either direction); private accounts are messageable like
+anyone else. Both participants must first enable encrypted messaging.
+
+New text bodies are encrypted in the browser. Image, voice and video attachments
+remain accessible to MyTuums through its existing media pipeline. Email recovery allows MyTuums to
+unlock history, so this is not provider-inaccessible E2EE. A new browser uses
+a fresh email code after normal sign-in, with no separate messaging password.
+Trusted browsers retain keys until site data is cleared. Old plaintext rows
+are labeled, and encrypted inbox previews show “Encrypted message”. See
+[the privacy and recovery limits](message-encryption.md).
 
 The `/messages` surface is an app pane, not a document page: it spans the
 full window width on desktop, with the conversation list beside the open
@@ -311,10 +319,10 @@ displayed message. Live delivery rides a server-sent event stream —
 `/events/messages` — that pushes thin refresh notices; a missed push loses
 nothing, and the badge and open thread refetch on reconnect and focus.
 
-Reporting a message works from the thread (tombstones included): the report
-snapshots the message plus up to ten before it, moderators see that snapshot
-with both parties' handles, and every sanction lands on the sender. There is
-deliberately no moderator browse surface for conversations.
+Reporting a readable encrypted message explicitly discloses only that selected
+message as signed plaintext evidence. Legacy reports retain up to ten preceding
+legacy messages. Moderators see report snapshots; every sanction lands on the
+sender. There is deliberately no moderator browse surface for conversations.
 
 ## Notifications
 
@@ -683,7 +691,8 @@ rendered with the same safe linkification as a post, beside at most one media
 group (up to four images, or one voice note, or one video). A sender's
 deletion is a tombstone ("message deleted"), never a row delete, and it hides
 the attachments with the text. Reportable from the thread; reports carry the
-message plus its bounded context (attachments included) to moderation.
+selected decrypted text and attachments for encrypted messages, or a bounded
+legacy context window, to moderation.
 _Avoid:_ DM (the whole feature), chat.
 
 **Voice message** — a recorded audio note sent as a message's single media

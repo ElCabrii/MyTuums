@@ -18,33 +18,35 @@ MyTuums — a Twitter-style social app (posts, replies, likes, bookmarks,
 follows, profiles, moderation) with real authentication. pnpm 12 + Turborepo
 on Node 24, TypeScript strict everywhere.
 
-| Workspace           | Package                  | Owns                                                              |
-| ------------------- | ------------------------ | ----------------------------------------------------------------- |
-| `apps/web`          | `@my-tuums/web`          | React 19 + Vite SPA, TanStack Router, Jotai                       |
-| `apps/branding`     | `@my-tuums/branding`     | the public landing site served at about.mytuums.com               |
-| `apps/server`       | `@my-tuums/server`       | Cloudflare application Worker and native maintenance CLIs         |
-| `apps/link-fetcher` | `@my-tuums/link-fetcher` | private Cloudflare Container for guarded rich-link HTTP           |
-| `apps/jobs`         | `@my-tuums/jobs`         | Cloudflare Workflows, video processing, Cron recovery and pruning |
-| `packages/api`      | `@my-tuums/api`          | oRPC procedures, business rules, media, moderation                |
-| `packages/auth`     | `@my-tuums/auth`         | the single better-auth instance                                   |
-| `packages/db`       | `@my-tuums/db`           | Drizzle schema, migrations, test-database guards                  |
-| `e2e`               | `@my-tuums/e2e`          | Playwright journeys over the real stack                           |
+| Workspace                 | Package                    | Owns                                                              |
+| ------------------------- | -------------------------- | ----------------------------------------------------------------- |
+| `apps/web`                | `@my-tuums/web`            | React 19 + Vite SPA, TanStack Router, Jotai                       |
+| `apps/branding`           | `@my-tuums/branding`       | the public landing site served at about.mytuums.com               |
+| `apps/server`             | `@my-tuums/server`         | Cloudflare application Worker and native maintenance CLIs         |
+| `apps/link-fetcher`       | `@my-tuums/link-fetcher`   | private Cloudflare Container for guarded rich-link HTTP           |
+| `apps/jobs`               | `@my-tuums/jobs`           | Cloudflare Workflows, video processing, Cron recovery and pruning |
+| `packages/api`            | `@my-tuums/api`            | oRPC procedures, business rules, media, moderation                |
+| `packages/auth`           | `@my-tuums/auth`           | the single better-auth instance                                   |
+| `packages/db`             | `@my-tuums/db`             | Drizzle schema, migrations, test-database guards                  |
+| `packages/message-crypto` | `@my-tuums/message-crypto` | Browser-safe message encryption and backup formats                |
+| `e2e`                     | `@my-tuums/e2e`            | Playwright journeys over the real stack                           |
 
 ## Context routing
 
-| If the change is about                                    | Go to                                                        |
-| --------------------------------------------------------- | ------------------------------------------------------------ |
-| UI, routes, client state, i18n copy, theme                | [apps/web/CONTEXT.md](apps/web/CONTEXT.md)                   |
-| The public landing site at `about.mytuums.com`            | [apps/branding/CONTEXT.md](apps/branding/CONTEXT.md)         |
-| HTTP routing, config validation, headers, Worker runtime  | [apps/server/CONTEXT.md](apps/server/CONTEXT.md)             |
-| Cloudflare background execution and scheduled recovery    | [apps/jobs/CONTEXT.md](apps/jobs/CONTEXT.md)                 |
-| Outbound rich-link networking                             | [apps/link-fetcher/CONTEXT.md](apps/link-fetcher/CONTEXT.md) |
-| Business rules, RPC procedures, moderation, media/storage | [packages/api/CONTEXT.md](packages/api/CONTEXT.md)           |
-| Sign-in, OAuth providers, sessions, auth email            | [packages/auth/CONTEXT.md](packages/auth/CONTEXT.md)         |
-| Schema, migrations, test databases                        | [packages/db/CONTEXT.md](packages/db/CONTEXT.md)             |
-| End-to-end journeys                                       | [e2e/CONTEXT.md](e2e/CONTEXT.md)                             |
-| Workflows, CI jobs                                        | [.github/CONTEXT.md](.github/CONTEXT.md)                     |
-| Repository lint and TypeScript tooling                    | root configs, `package.json`, `tools/oxlint/`                |
+| If the change is about                                    | Go to                                                                    |
+| --------------------------------------------------------- | ------------------------------------------------------------------------ |
+| UI, routes, client state, i18n copy, theme                | [apps/web/CONTEXT.md](apps/web/CONTEXT.md)                               |
+| The public landing site at `about.mytuums.com`            | [apps/branding/CONTEXT.md](apps/branding/CONTEXT.md)                     |
+| HTTP routing, config validation, headers, Worker runtime  | [apps/server/CONTEXT.md](apps/server/CONTEXT.md)                         |
+| Cloudflare background execution and scheduled recovery    | [apps/jobs/CONTEXT.md](apps/jobs/CONTEXT.md)                             |
+| Outbound rich-link networking                             | [apps/link-fetcher/CONTEXT.md](apps/link-fetcher/CONTEXT.md)             |
+| Business rules, RPC procedures, moderation, media/storage | [packages/api/CONTEXT.md](packages/api/CONTEXT.md)                       |
+| Sign-in, OAuth providers, sessions, auth email            | [packages/auth/CONTEXT.md](packages/auth/CONTEXT.md)                     |
+| Schema, migrations, test databases                        | [packages/db/CONTEXT.md](packages/db/CONTEXT.md)                         |
+| Message encryption and recovery formats                   | [packages/message-crypto/CONTEXT.md](packages/message-crypto/CONTEXT.md) |
+| End-to-end journeys                                       | [e2e/CONTEXT.md](e2e/CONTEXT.md)                                         |
+| Workflows, CI jobs                                        | [.github/CONTEXT.md](.github/CONTEXT.md)                                 |
+| Repository lint and TypeScript tooling                    | root configs, `package.json`, `tools/oxlint/`                            |
 
 Cross-package questions — how the pieces fit, what a request does end to end —
 are answered in [docs/architecture.md](docs/architecture.md).
@@ -75,8 +77,9 @@ to the owning context.
   `@my-tuums/api/roles` and `@my-tuums/auth/rules` must never import
   `@my-tuums/db`; the web app imports them, and a database import throws at
   module load in a browser.
-  Those six are the _only_ workspace modules in the SPA bundle, and they are
-  the only ones `apps/web` may import from either package.
+  Those subpaths are the only imports `apps/web` may take from the API/auth
+  packages. `@my-tuums/message-crypto` is a separate browser-safe workspace
+  and must remain free of API/database/runtime dependencies.
 - **Auth-owned user fields are written through the auth client only.**
   `packages/auth`'s database hooks enforce their user-field rules; an oRPC
   procedure writing them bypasses validation. The duplicated handle columns
@@ -169,3 +172,6 @@ What belongs in which suite, and when a test deserves to exist at all:
 - [docs/operations.md](docs/operations.md) — environments, deploys, CI.
 - [docs/security.md](docs/security.md) — trust boundaries and sensitive invariants.
 - [TESTING_STRATEGY.md](TESTING_STRATEGY.md) — the test portfolio and its rules.
+
+Message privacy and the chosen email-recovery tradeoff are documented in
+[recoverable message encryption](docs/message-encryption.md).

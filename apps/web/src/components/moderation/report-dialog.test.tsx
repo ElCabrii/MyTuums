@@ -48,6 +48,49 @@ async function openReportDialog(target: ReportDialogTarget) {
 }
 
 describe("ReportDialog", () => {
+  it("previews and reports attachments without disclosing an unreadable caption", async () => {
+    fakeClient.moderation.report.mockResolvedValue({ reported: true });
+    const { store } = await openReportDialog({
+      targetType: "message",
+      targetId: "unreadable-media",
+      body: null,
+      attachments: [
+        {
+          id: "image",
+          kind: "image",
+          url: "/media/messages/unreadable/image.png",
+          contentType: "image/png",
+          byteSize: 100,
+          position: 0,
+          width: 2,
+          height: 2,
+          durationMs: null,
+          video: null,
+        },
+      ],
+    });
+    expect(
+      await screen.findByRole("img", { name: m.messages_media_image_label({ name: "1" }) }),
+    ).toHaveAttribute("src", "/media/messages/unreadable/image.png");
+    expect(screen.getByText(m.messages_report_attachments_only())).toBeInTheDocument();
+    expect(screen.queryByText(m.messages_tombstone())).not.toBeInTheDocument();
+    act(() => store.set(reportReasonAtom, "spam"));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: m.moderation_report_submit() }));
+    await waitFor(() =>
+      expect(fakeClient.moderation.report).toHaveBeenCalledWith(
+        {
+          targetType: "message",
+          targetId: "unreadable-media",
+          reason: "spam",
+          disclosure: undefined,
+        },
+        expect.anything(),
+      ),
+    );
+  });
+
   it("keeps Report disabled until a reason is picked, then submits the post target", async () => {
     fakeClient.moderation.report.mockResolvedValue({ reported: true });
     const { store } = await openReportDialog({

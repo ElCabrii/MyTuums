@@ -1,3 +1,8 @@
+import {
+  envelopeSchema,
+  identitySchema,
+  validateEnvelopeRecipients,
+} from "@my-tuums/message-crypto";
 import { ORPCError } from "@orpc/server";
 import { and, desc, eq, isNull, ne, not, sql, type SQLWrapper } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -9,6 +14,7 @@ import {
   follow,
   mediaIntent,
   message,
+  messageIdentity,
   messageAttachment,
   user,
   userBlock,
@@ -16,7 +22,6 @@ import {
 } from "@my-tuums/db/schema";
 import {
   CURSOR_MAX_ENCODED_LENGTH,
-  MESSAGE_BODY_MAX_LENGTH,
   MESSAGE_IMAGE_MAX_COUNT,
   MESSAGE_PAGE_SIZE,
   MESSAGE_PAGE_SIZE_MAX,
@@ -45,7 +50,7 @@ import { effectivelyBanned } from "./visibility.js";
 
 /**
  * The private-message surface (issue #408): one conversation per pair of
- * users, plain-text messages, message requests as the anti-spam gate, and a
+ * users, encrypted messages with read-only legacy plaintext, message requests as the anti-spam gate, and a
  * per-participant read cursor.
  *
  * Every write here re-checks its eligibility inside the same D1 batch it
@@ -118,6 +123,25 @@ function otherParticipant() {
   return alias(conversationParticipant, "other_participant");
 }
 
+/** Resolve retries only from committed state, including the winning request's attachments. */
+async function readSentMessage(db: Database, id: string, senderId: string, envelope: string) {
+  const [row] = await db
+    .select({
+      id: message.id,
+      conversationId: message.conversationId,
+      senderId: message.senderId,
+      createdAt: message.createdAt,
+      envelope: message.envelope,
+      attachments: messageAttachmentsSelection(),
+    })
+    .from(message)
+    .where(eq(message.id, id))
+    .limit(1);
+  if (!row) return null;
+  if (row.senderId !== senderId || row.envelope !== envelope) throw new ORPCError("CONFLICT");
+  return { ...row, body: null, envelope };
+}
+
 /**
  * The last message of each conversation on a page, as a preview: tombstoned
  * bodies redact to null (the placeholder is the client's translation), and
@@ -131,19 +155,40 @@ async function lastMessagePreviews(
   db: Database,
   conversationIds: string[],
 ): Promise<
-  Map<string, { senderId: string; body: string | null; mediaKind: string | null; createdAt: Date }>
+  Map<
+    string,
+    {
+      senderId: string;
+      body: string | null;
+      mediaKind: string | null;
+      createdAt: Date;
+      encrypted: boolean;
+    }
+  >
 > {
   const previews = new Map<
     string,
-    { senderId: string; body: string | null; mediaKind: string | null; createdAt: Date }
+    {
+      senderId: string;
+      body: string | null;
+      mediaKind: string | null;
+      createdAt: Date;
+      encrypted: boolean;
+    }
   >();
   if (conversationIds.length === 0) return previews;
   const probe = (conversationId: string) =>
     db
       .select({
+        encrypted:
+          sql<boolean>`${message.envelope} is not null and ${message.deletedAt} is null`.mapWith(
+            Boolean,
+          ),
         conversationId: message.conversationId,
         senderId: message.senderId,
-        body: sql<string | null>`case when ${message.deletedAt} is null then ${message.body} end`,
+        body: sql<
+          string | null
+        >`case when ${message.deletedAt} is null and ${message.envelope} is null then ${message.body} end`,
         mediaKind: sql<string | null>`case when ${message.deletedAt} is null
           then ${previewMediaKind()} end`,
         createdAt: message.createdAt,
@@ -158,7 +203,14 @@ async function lastMessagePreviews(
   const pages = await db.batch([probe(firstId), ...restIds.map(probe)]);
   for (const page of pages) {
     const row = page[0];
-    if (row) previews.set(row.conversationId, row);
+    if (row)
+      previews.set(row.conversationId, {
+        senderId: row.senderId,
+        body: row.body,
+        mediaKind: row.mediaKind,
+        createdAt: row.createdAt,
+        encrypted: row.encrypted,
+      });
   }
   return previews;
 }
@@ -203,13 +255,10 @@ export const messageRouter = {
     .use(rateLimit(RATE_LIMITS.messageSend))
     .input(
       z
-        .object({
-          recipientId: z.string().min(1),
-          // Trim first so whitespace never persists as fake content. Empty is
-          // legal only beside an attachment (the cross-field rule below) —
-          // the database check pins the upper bound alone because it cannot
-          // see the attachment table.
-          body: z.string().trim().max(MESSAGE_BODY_MAX_LENGTH).default(""),
+        .strictObject({
+          id: z.uuid(),
+          recipientId: z.string().min(1).max(128),
+          envelope: envelopeSchema,
           images: z.array(z.instanceof(File)).max(MESSAGE_IMAGE_MAX_COUNT).default([]),
           voice: z.instanceof(File).optional(),
           /** The composer's measured recording length; the byte cap bounds any lie. */
@@ -225,14 +274,6 @@ export const messageRouter = {
           ({ images, voice, videoId }) =>
             Number(images.length > 0) + Number(Boolean(voice)) + Number(Boolean(videoId)) <= 1,
           { error: "A message can contain one media kind.", path: ["images"] },
-        )
-        .refine(
-          ({ body, images, voice, videoId }) =>
-            Boolean(body) || images.length > 0 || Boolean(voice) || Boolean(videoId),
-          {
-            error: "Write a message or attach media.",
-            path: ["body"],
-          },
         )
         .refine(({ voice, voiceDurationMs }) => !voice || voiceDurationMs !== undefined, {
           error: "A voice note needs its recorded duration.",
@@ -269,11 +310,34 @@ export const messageRouter = {
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
       }
 
+      const identities = await context.db
+        .select({ userId: messageIdentity.userId, publicIdentity: messageIdentity.publicIdentity })
+        .from(messageIdentity)
+        .where(sql`${messageIdentity.userId} in (${senderId}, ${input.recipientId})`);
+      const senderIdentity = identities.find((entry) => entry.userId === senderId);
+      const recipientIdentity = identities.find((entry) => entry.userId === input.recipientId);
+      if (!senderIdentity || !recipientIdentity)
+        throw new ORPCError("PRECONDITION_FAILED", {
+          message: "Both people must enable encrypted messaging first.",
+        });
+      try {
+        await validateEnvelopeRecipients(
+          input.envelope,
+          identitySchema.parse(JSON.parse(senderIdentity.publicIdentity)),
+          identitySchema.parse(JSON.parse(recipientIdentity.publicIdentity)),
+        );
+      } catch {
+        throw new ORPCError("BAD_REQUEST", { message: "Invalid encrypted message recipients." });
+      }
+      const envelope = JSON.stringify(input.envelope);
+      if (envelope.length > 32768) throw new ORPCError("BAD_REQUEST");
+      const existing = await readSentMessage(context.db, input.id, senderId, envelope);
+      if (existing) return existing;
       // Media preparation reads and validates every byte BEFORE anything is
       // written; a refusal here leaves no record anywhere. Images and voice
       // ride this RPC (the caps above keep the body inside the RPC ceiling);
       // the video is already IN Stream — this only validates its row.
-      const messageId = crypto.randomUUID();
+      const messageId = input.id;
       const stagedImages = input.images.length
         ? (
             await readMessageImages(input.images, (reason) => {
@@ -335,6 +399,9 @@ export const messageRouter = {
           .where(and(eq(video.id, input.videoId), eq(video.authorId, senderId)))
           .limit(1);
         if (!row || row.state !== "uploaded" || row.expiresAt.getTime() <= Date.now()) {
+          // The winning retry may have queued this video after our first read.
+          const duplicate = await readSentMessage(context.db, input.id, senderId, envelope);
+          if (duplicate) return duplicate;
           throw new ORPCError("BAD_REQUEST", {
             message: "That video is no longer available. Upload it again.",
           });
@@ -416,143 +483,161 @@ export const messageRouter = {
               where m.id = ${messageId} and m.sender_id = ${senderId}`,
         );
 
-      const [, , , inserted] = await context.db.batch([
-        // Seed the pair's conversation; the loser of a concurrent first-send
-        // race is a no-op on the unique pair key and every later statement
-        // resolves the winner's row by the pair, so both sends land together.
-        context.db
-          .insert(conversation)
-          .select(
-            sql`select ${conversationId}, ${userAId}, ${userBId},
+      let sent: Pick<
+        typeof message.$inferSelect,
+        "id" | "conversationId" | "senderId" | "createdAt"
+      >;
+      try {
+        const [, , , inserted] = await context.db.batch([
+          // Seed the pair's conversation; the loser of a concurrent first-send
+          // race is a no-op on the unique pair key and every later statement
+          // resolves the winner's row by the pair, so both sends land together.
+          context.db
+            .insert(conversation)
+            .select(
+              sql`select ${conversationId}, ${userAId}, ${userBId},
               cast(unixepoch('subsec') * 1000 as integer),
               cast(unixepoch('subsec') * 1000 as integer)
               where ${eligible}`,
-          )
-          .onConflictDoNothing(),
-        context.db
-          .insert(conversationParticipant)
-          .select(
-            sql`select c.id, ${senderId}, 'active', null, cast(unixepoch('subsec') * 1000 as integer) ${pairRow}`,
-          )
-          .onConflictDoUpdate({
-            target: [conversationParticipant.conversationId, conversationParticipant.userId],
-            // Replying is the implicit accept of the sender's own side.
-            set: { status: "active" },
-          }),
-        context.db
-          .insert(conversationParticipant)
-          .select(
-            sql`select c.id, ${input.recipientId}, ${recipientStatus}, null, cast(unixepoch('subsec') * 1000 as integer) ${pairRow}`,
-          )
-          .onConflictDoNothing(),
-        context.db
-          .insert(message)
-          .select(
-            sql`select ${messageId}, c.id, ${senderId}, ${input.body},
-              max(cast(unixepoch('subsec') * 1000 as integer), c.last_message_at + 1), null ${pairRow}`,
-          )
-          .returning({
-            id: message.id,
-            conversationId: message.conversationId,
-            senderId: message.senderId,
-            createdAt: message.createdAt,
-          }),
-        // The ordering cursor advances to exactly the message's timestamp,
-        // and only because the message landed in this conversation.
-        context.db
-          .update(conversation)
-          .set({
-            lastMessageAt: sql`(select m.created_at from ${message} m where m.id = ${messageId})`,
-          })
-          .where(
-            and(
-              eq(conversation.userAId, userAId),
-              eq(conversation.userBId, userBId),
-              sql`exists (select 1 from ${message}
+            )
+            .onConflictDoNothing(),
+          context.db
+            .insert(conversationParticipant)
+            .select(
+              sql`select c.id, ${senderId}, 'active', null, cast(unixepoch('subsec') * 1000 as integer) ${pairRow}`,
+            )
+            .onConflictDoUpdate({
+              target: [conversationParticipant.conversationId, conversationParticipant.userId],
+              // Replying is the implicit accept of the sender's own side.
+              set: { status: "active" },
+            }),
+          context.db
+            .insert(conversationParticipant)
+            .select(
+              sql`select c.id, ${input.recipientId}, ${recipientStatus}, null, cast(unixepoch('subsec') * 1000 as integer) ${pairRow}`,
+            )
+            .onConflictDoNothing(),
+          // A duplicate must hit the unique constraint even if eligibility
+          // changed after the pre-read. Otherwise a skipped insert could let
+          // later attachment writes mutate the winning request's message.
+          context.db
+            .insert(message)
+            .select(
+              sql`select ${messageId}, c.id, ${senderId}, '[encrypted]', ${envelope},
+              max(cast(unixepoch('subsec') * 1000 as integer), c.last_message_at + 1), null
+              from ${conversation} c
+              where c.id = (select m.conversation_id from ${message} m where m.id = ${messageId})
+                or (c.user_a_id = ${userAId} and c.user_b_id = ${userBId} and ${eligible})`,
+            )
+            .returning({
+              id: message.id,
+              conversationId: message.conversationId,
+              senderId: message.senderId,
+              createdAt: message.createdAt,
+            }),
+          // The ordering cursor advances to exactly the message's timestamp,
+          // and only because the message landed in this conversation.
+          context.db
+            .update(conversation)
+            .set({
+              lastMessageAt: sql`max(${conversation.lastMessageAt}, (select m.created_at from ${message} m where m.id = ${messageId}))`,
+            })
+            .where(
+              and(
+                eq(conversation.userAId, userAId),
+                eq(conversation.userBId, userBId),
+                sql`exists (select 1 from ${message}
                 where ${message.id} = ${messageId} and ${message.conversationId} = ${conversation.id})`,
+              ),
+            ),
+          // Attachment rows, upload-intent consumption and the video's queueing
+          // land only when the message did.
+          ...stagedImages.map((image, position) =>
+            attachmentInsert(
+              image.attachmentId,
+              position,
+              "image",
+              mediaPathFor(image.key),
+              image.type,
+              image.bytes.byteLength,
+              {
+                width: image.width,
+                height: image.height,
+              },
             ),
           ),
-        // Attachment rows, upload-intent consumption and the video's queueing
-        // land only when the message did.
-        ...stagedImages.map((image, position) =>
-          attachmentInsert(
-            image.attachmentId,
-            position,
-            "image",
-            mediaPathFor(image.key),
-            image.type,
-            image.bytes.byteLength,
-            {
-              width: image.width,
-              height: image.height,
-            },
-          ),
-        ),
-        ...(stagedVoice
-          ? [
-              attachmentInsert(
-                stagedVoice.attachmentId,
-                0,
-                "voice",
-                mediaPathFor(stagedVoice.key),
-                stagedVoice.type,
-                stagedVoice.bytes.byteLength,
-                { durationMs: stagedVoice.durationMs },
-              ),
-            ]
-          : []),
-        ...(uploadId
-          ? [
-              context.db
-                .delete(mediaIntent)
-                .where(
-                  and(
-                    eq(mediaIntent.id, uploadId),
-                    sql`exists (select 1 from ${message} where ${message.id} = ${messageId})`,
-                  ),
+          ...(stagedVoice
+            ? [
+                attachmentInsert(
+                  stagedVoice.attachmentId,
+                  0,
+                  "voice",
+                  mediaPathFor(stagedVoice.key),
+                  stagedVoice.type,
+                  stagedVoice.bytes.byteLength,
+                  { durationMs: stagedVoice.durationMs },
                 ),
-            ]
-          : []),
-        ...(videoRow
-          ? [
-              attachmentInsert(
-                videoAttachmentId,
-                0,
-                "video",
-                messageVideoMediaPath(videoRow.id),
-                "application/vnd.apple.mpegurl",
-                videoRow.byteSize,
-                { videoId: videoRow.id },
-              ),
-              context.db
-                .update(video)
-                .set({
-                  state: "queued",
-                  expiresAt: sql`cast(unixepoch('subsec') * 1000 as integer) + 1800000`,
-                })
-                .where(
-                  and(
-                    eq(video.id, videoRow.id),
-                    eq(video.authorId, senderId),
-                    eq(video.state, "uploaded"),
-                    messageLanded,
+              ]
+            : []),
+          ...(uploadId
+            ? [
+                context.db
+                  .delete(mediaIntent)
+                  .where(
+                    and(
+                      eq(mediaIntent.id, uploadId),
+                      sql`exists (select 1 from ${message} where ${message.id} = ${messageId})`,
+                    ),
                   ),
+              ]
+            : []),
+          ...(videoRow
+            ? [
+                attachmentInsert(
+                  videoAttachmentId,
+                  0,
+                  "video",
+                  messageVideoMediaPath(videoRow.id),
+                  "application/vnd.apple.mpegurl",
+                  videoRow.byteSize,
+                  { videoId: videoRow.id },
                 ),
-              jobIntentInsert(
-                context.db,
-                { id: `video-${videoRow.id}`, kind: "video", entityId: videoRow.id },
-                messageLanded,
-              ),
-            ]
-          : []),
-      ]);
+                context.db
+                  .update(video)
+                  .set({
+                    state: "queued",
+                    expiresAt: sql`cast(unixepoch('subsec') * 1000 as integer) + 1800000`,
+                  })
+                  .where(
+                    and(
+                      eq(video.id, videoRow.id),
+                      eq(video.authorId, senderId),
+                      eq(video.state, "uploaded"),
+                      messageLanded,
+                    ),
+                  ),
+                jobIntentInsert(
+                  context.db,
+                  { id: `video-${videoRow.id}`, kind: "video", entityId: videoRow.id },
+                  messageLanded,
+                ),
+              ]
+            : []),
+        ]);
 
-      const sent = inserted[0];
-      if (!sent) {
-        // Eligibility flipped between the pre-read and the batch (a block
-        // landed, the recipient vanished, the video vanished). Nothing was
-        // written; the objects stay behind the intent for recovery.
-        throw new ORPCError("NOT_FOUND", { message: "No such user." });
+        const insertedMessage = inserted[0];
+        if (!insertedMessage) {
+          throw new ORPCError("NOT_FOUND", { message: "No such user." });
+        }
+        sent = insertedMessage;
+      } catch (error) {
+        // A concurrent retry can pass the pre-read before its twin commits.
+        // Keep the unique insert: D1 rolls back the entire losing batch, so
+        // attachments and participant changes cannot land a second time.
+        // Its staged objects remain behind their upload intent for cleanup.
+        const duplicate = await readSentMessage(context.db, input.id, senderId, envelope);
+        if (duplicate) return duplicate;
+        throw error;
       }
 
       // Commit first; the Workflow's own recovery owns a missing dispatch.
@@ -629,7 +714,7 @@ export const messageRouter = {
           conversationId: sent.conversationId,
         }),
       ]);
-      return { ...sent, body: input.body, attachments };
+      return { ...sent, body: null, envelope, attachments };
     }),
 
   /**
@@ -837,7 +922,12 @@ export const messageRouter = {
       const selection = {
         id: message.id,
         senderId: message.senderId,
-        body: sql<string | null>`case when ${message.deletedAt} is null then ${message.body} end`,
+        body: sql<
+          string | null
+        >`case when ${message.deletedAt} is null and ${message.envelope} is null then ${message.body} end`,
+        envelope: sql<
+          string | null
+        >`case when ${message.deletedAt} is null then ${message.envelope} end`,
         createdAt: message.createdAt,
         deletedAt: message.deletedAt,
         // Tombstoned messages redact their attachments with their body — the

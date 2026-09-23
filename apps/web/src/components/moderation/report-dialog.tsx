@@ -18,8 +18,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { reasonLabel } from "@/components/moderation/labels";
+import { MessageAttachments } from "@/components/message-attachments";
 import { PostAttachmentGrid } from "@/components/post-attachment-grid";
-import type { Post } from "@/lib/orpc";
+import type { MessageAttachment, Post } from "@/lib/orpc";
 import { m } from "@/paraglide/messages.js";
 
 /**
@@ -75,7 +76,18 @@ function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
         {/* The post being reported, so the reporter confirms what they are
             flagging before picking a reason. A user target has no post. */}
         {target.targetType === "post" && <ReportPreview post={target.post} />}
-        {target.targetType === "message" && <MessageReportPreview body={target.body} />}
+        {target.targetType === "message" && (
+          <>
+            <MessageReportPreview body={target.body} attachments={target.attachments ?? []} />
+            {(target.disclosure || (target.body === null && !!target.attachments?.length)) && (
+              <p className="text-muted-foreground text-sm">
+                {target.disclosure
+                  ? m.messages_report_disclosure()
+                  : m.messages_report_attachments_only()}
+              </p>
+            )}
+          </>
+        )}
         {/* `items` is what makes the trigger read "Hate speech" once a reason
             is picked: Base UI renders the raw code otherwise. */}
         <Select
@@ -124,6 +136,7 @@ function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
                   // the schema's own union, not a coercion.
                   report.mutate({
                     targetType: target.targetType,
+                    disclosure: target.targetType === "message" ? target.disclosure : undefined,
                     targetId: target.targetId,
                     reason: trimmed as (typeof POST_REPORT_REASONS)[number],
                   });
@@ -161,7 +174,13 @@ function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
  * would be a lie about what is gone.
  */
 /** A private message being reported: its text, or the tombstone note. */
-function MessageReportPreview({ body }: { body: string | null }) {
+function MessageReportPreview({
+  body,
+  attachments,
+}: {
+  body: string | null;
+  attachments: MessageAttachment[];
+}) {
   return (
     <div className="border-border/60 bg-muted/30 space-y-2 rounded-lg border p-3 text-left">
       <p className="text-muted-foreground text-xs font-medium">
@@ -171,9 +190,10 @@ function MessageReportPreview({ body }: { body: string | null }) {
         <p className="text-foreground/90 text-sm leading-relaxed break-words whitespace-pre-line">
           {body}
         </p>
-      ) : (
+      ) : attachments.length === 0 ? (
         <p className="text-muted-foreground text-sm italic">{m.messages_tombstone()}</p>
-      )}
+      ) : null}
+      <MessageAttachments attachments={attachments} mine={false} />
     </div>
   );
 }

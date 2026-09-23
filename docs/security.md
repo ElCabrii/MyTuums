@@ -560,7 +560,8 @@ view-history store to leak.
   queue, case view, audit or CLI — that lists or searches `conversation` or
   `message` rows, and no per-message removal power. DM content reaches
   moderation exactly one way: a participant files a report, whose snapshot
-  (the reported message plus up to ten before it) is the evidence a case view
+  (only the signed, explicitly disclosed message for encrypted rows; up to
+  ten preceding legacy messages for plaintext rows) is the evidence a case view
   renders and the only copy a moderator sees. Sanctions are sender-side
   (warn-equivalent dismissals, suspension, ban) through the existing user
   actions; a `case_resolved` audit row for a message case names the sender,
@@ -644,3 +645,14 @@ view-history store to leak.
 - [../SECURITY.md](../SECURITY.md) — how to report a vulnerability.
 - [architecture.md](architecture.md) — the route order and flows referenced here.
 - [operations.md](operations.md) — environments, secrets, and CI.
+
+## Recoverable message encryption
+
+New message text uses client-side encryption with provider-held recovery keys.
+Image, voice and video attachments use the existing server-managed media pipeline
+and remain accessible to the service and storage providers.
+The accepted email-only history-recovery policy prevents a provider-inaccessible
+E2EE claim. D1 holds encrypted bodies and wrapped identity backups; the same
+application Worker holds the recovery secret. Account/email or Worker compromise
+can expose history. There is no forward secrecy or per-device revocation.
+See [the complete design, boundaries and rollout](message-encryption.md).

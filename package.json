@@ -33,7 +33,8 @@
     "db:grant:founder": "pnpm --filter @my-tuums/db db:grant:founder",
     "lighthouse": "lighthouse http://localhost:3001/ --output=json --output-path=lighthouse-reports/mobile.json --chrome-flags=\"--headless=new\" --quiet",
     "lighthouse:desktop": "lighthouse http://localhost:3001/ --preset=desktop --output=json --output-path=lighthouse-reports/desktop.json --chrome-flags=\"--headless=new\" --quiet",
-    "db:migrate": "pnpm --filter @my-tuums/db db:migrate"
+    "db:migrate": "pnpm --filter @my-tuums/db db:migrate",
+    "messages:recovery-key": "tsx scripts/create-message-recovery-key.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260908.1",

@@ -124,11 +124,17 @@ export type MessageRequestItem = MessageRequestPage["items"][number];
 /** The `message.thread` payload: the other user, the read cursor, and the messages. */
 export type MessageThread = Awaited<ReturnType<typeof client.message.thread>>;
 /** One message in a thread; `body` is null on a sender's tombstone. */
-export type MessageItem = MessageThread["items"][number];
-/** One attachment row of a thread message (image, voice note, or video). */
+export type MessageItem = Omit<MessageThread["items"][number], "envelope"> & {
+  envelope?: string | null;
+  disclosure?: string;
+  decryptionFailed?: boolean;
+};
 export type MessageAttachment = NonNullable<MessageItem["attachments"]>[number];
 /** A stored message as `message.send` returns it — the optimistic row's authority. */
-export type SentMessage = Awaited<ReturnType<typeof client.message.send>>;
+export type SentMessage = Omit<
+  Awaited<ReturnType<typeof client.message.send>>,
+  "body" | "envelope"
+> & { body: string; envelope?: string | null };
 
 /**
  * A handle that doesn't exist won't start existing on the second attempt, and

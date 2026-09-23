@@ -1243,10 +1243,10 @@ export const conversationParticipant = sqliteTable(
  * the reader has seen. The keyset cursor still carries `id` as a tie-breaker
  * for ordering, but the read cursor relies on strict monotonicity.
  *
- * The body may be empty exactly when an attachment row exists (media-only
- * messages) — a cross-table rule the schema cannot express, so the
- * `message_body_length` check pins only the upper bound and `messages.ts`'s
- * send batch enforces the pairing; `messages.int.test.ts` pins it too.
+ * Legacy rows retain their text or empty media-only caption. New rows store
+ * the fixed [encrypted] placeholder and an envelope; migration 0012 enforces
+ * that boundary. The browser enforces text-or-media before encryption, since
+ * the server cannot inspect encrypted captions.
  *
  * Sender deletion is a tombstone (`deletedAt`), never a row delete — the
  * conversation's order survives, and the stored body remains as report
@@ -1268,11 +1268,9 @@ export const message = sqliteTable(
     senderId: text("sender_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    // SQLite's length() counts characters and JavaScript's `.length` counts
-    // UTF-16 units, so a zod-checked 2000-unit string is always within this
-    // bound — never longer. Empty is legal only beside an attachment (see the
-    // table comment).
+    // Legacy plaintext only; new messages use [encrypted] and the envelope below.
     body: text("body").notNull(),
+    envelope: text("envelope"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
       .notNull(),
@@ -1285,6 +1283,33 @@ export const message = sqliteTable(
     index("message_conversation_created_idx").on(t.conversationId, desc(t.createdAt), desc(t.id)),
   ],
 );
+
+/** Immutable account identity and its provider-recoverable encrypted private-key backup. */
+export const messageIdentity = sqliteTable("message_identity", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  publicIdentity: text("public_identity").notNull(),
+  backup: text("backup").notNull(),
+  recoveryKeyId: text("recovery_key_id").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+    .notNull(),
+});
+
+/** At most one short-lived, session-bound recovery challenge per account; no email code is stored. */
+export const messageRecovery = sqliteTable("message_recovery", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  id: text("id").notNull(),
+  sessionId: text("session_id").notNull(),
+  email: text("email").notNull(),
+  codeHash: text("code_hash").notNull(),
+  transportKey: text("transport_key").notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  attempts: integer("attempts").notNull().default(0),
+});
 
 /**
  * One media attachment of a direct message (issue #408): an image group

@@ -1,7 +1,9 @@
+import { createIdentity, unlockIdentity, type LocalIdentity } from "@my-tuums/message-crypto";
 import { beforeEach, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 
 const fakeClient = {
+  messageKey: { status: vi.fn() },
   message: {
     send: vi.fn(),
     conversations: vi.fn(),
@@ -17,10 +19,9 @@ const fakeClient = {
   },
 };
 
-installTestOrpc(createTanstackQueryUtils(fakeClient));
+installTestClient(fakeClient);
 
-import { createTanstackQueryUtils } from "@orpc/tanstack-query";
-import { installTestOrpc } from "@/lib/orpc";
+import { installTestClient } from "@/lib/orpc";
 import type { ConversationItem } from "@/lib/orpc";
 import { messagesUnreadQueryOptions } from "@/lib/query-definitions";
 import { MessagesPage } from "@/components/messages-page";
@@ -36,6 +37,7 @@ import type { QueryClient } from "@tanstack/react-query";
  */
 
 const OTHER = "user-2";
+let local: LocalIdentity;
 
 function conversationRow(overrides: Partial<ConversationItem> = {}): ConversationItem {
   return {
@@ -43,13 +45,24 @@ function conversationRow(overrides: Partial<ConversationItem> = {}): Conversatio
     lastMessageAt: new Date(),
     lastReadAt: null,
     unreadCount: 0,
-    lastMessage: { senderId: OTHER, body: "hi", mediaKind: null, createdAt: new Date() },
+    lastMessage: {
+      encrypted: false,
+      senderId: OTHER,
+      body: "hi",
+      mediaKind: null,
+      createdAt: new Date(),
+    },
     user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
     ...overrides,
   };
 }
 
 function renderPage(queryClient: QueryClient) {
+  queryClient.setQueryData(["message-access", "viewer-1"], {
+    local,
+    identity: local.public,
+    recovery: null,
+  });
   return renderWithProviders(<MessagesPage />, {
     signedInAs: { id: "viewer-1" },
     initialPath: "/messages",
@@ -57,8 +70,9 @@ function renderPage(queryClient: QueryClient) {
   });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  local = await unlockIdentity(await createIdentity("viewer-1"));
 });
 
 it("each conversation row shows its own unread count, capped past ninety-nine", async () => {
@@ -69,6 +83,7 @@ it("each conversation row shows its own unread count, capped past ninety-nine", 
         conversationId: "c-2",
         unreadCount: 0,
         lastMessage: {
+          encrypted: false,
           senderId: "viewer-1",
           body: "my own",
           mediaKind: null,

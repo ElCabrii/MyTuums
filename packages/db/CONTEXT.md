@@ -243,6 +243,10 @@ The command name remains compatible with the completed preview migration.
 See [production execution](../../docs/cloudflare-production-migration.md) for
 resource identities, backups and cutover gates.
 
+## Recoverable messages
+
+Messaging migration 0011 adds encrypted envelopes, immutable account identity backups and session/email-bound recovery challenges. Custom migration 0012 forbids new plaintext inserts and body/envelope updates, preserving legacy reads and tombstones. Do not drop these triggers during table rebuilds or server rollback. See [encryption storage and rollout](../../docs/message-encryption.md).
+
 ## Message media migrations
 
 `0008_message_media.sql` adds `message_attachment` and permits empty message

@@ -404,6 +404,10 @@ documents instead.
 The production origin is an explicit public build input and part of Turbo's
 build cache key. The branding build shares this plugin.
 
+## Recoverable messages
+
+`src/atoms/message-access.ts` and `src/components/message-access.tsx` gate messaging on a local account identity. `src/lib/message-key-store.ts` retains non-extractable keys in IndexedDB; signing out clears plaintext caches but retains trusted-browser keys. Threads decrypt locally through `@my-tuums/message-crypto`; inbox previews stay generic. See [email recovery and privacy limits](../../docs/message-encryption.md).
+
 ## Message attachments
 
 `src/components/message-thread.tsx` owns the recipient-scoped composer: up to

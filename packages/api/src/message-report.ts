@@ -1,13 +1,17 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
 import {
+  conversation,
   conversationParticipant,
   message,
+  messageIdentity,
   report,
   user,
   video,
   messageAttachment,
 } from "@my-tuums/db/schema";
+import { identitySchema, verifyDisclosedMessage } from "@my-tuums/message-crypto";
+import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { messageAttachmentsSelection, messageAttachmentSchema } from "./message-media.js";
 
@@ -80,7 +84,8 @@ export function parseMessageReportSnapshot(raw: string | null): MessageReportSna
 }
 
 /**
- * Builds the snapshot for one message: the message itself plus up to
+ * Encrypted reports include only the disclosed message and its attachments.
+ * Legacy reports include the message itself plus up to
  * `MESSAGE_REPORT_CONTEXT` messages before it in the thread's keyset order,
  * reversed to reading order (oldest first) so the case view renders the
  * exchange top-down. Null when the message does not exist. Each row carries
@@ -93,13 +98,71 @@ export function parseMessageReportSnapshot(raw: string | null): MessageReportSna
 export async function buildMessageReportSnapshot(
   db: Database,
   messageId: string,
+  disclosure?: string,
 ): Promise<MessageReportSnapshot | null> {
   const [target] = await db
-    .select({ conversationId: message.conversationId, createdAt: message.createdAt })
+    .select({
+      conversationId: message.conversationId,
+      createdAt: message.createdAt,
+      envelope: message.envelope,
+      senderId: message.senderId,
+      senderHandle: user.username,
+      attachments: messageAttachmentsSelection(true),
+    })
     .from(message)
+    .innerJoin(user, eq(user.id, message.senderId))
     .where(eq(message.id, messageId))
     .limit(1);
   if (!target) return null;
+
+  if (target.envelope !== null) {
+    if (!disclosure && target.attachments.length === 0)
+      throw new ORPCError("BAD_REQUEST", {
+        message: "Choose the message text to disclose with this report.",
+      });
+    let body = "";
+    if (disclosure) {
+      const [sender] = await db
+        .select({ identity: messageIdentity.publicIdentity })
+        .from(messageIdentity)
+        .where(eq(messageIdentity.userId, target.senderId))
+        .limit(1);
+      const [pair] = await db
+        .select()
+        .from(conversation)
+        .where(eq(conversation.id, target.conversationId))
+        .limit(1);
+      if (!sender || !pair) return null;
+      try {
+        const verified = await verifyDisclosedMessage(
+          disclosure,
+          identitySchema.parse(JSON.parse(sender.identity)),
+        );
+        const recipientId = pair.userAId === target.senderId ? pair.userBId : pair.userAId;
+        if (verified.id !== messageId || verified.recipientId !== recipientId)
+          throw new Error("Incorrect report target.");
+        body = verified.body;
+      } catch {
+        throw new ORPCError("BAD_REQUEST", { message: "Message evidence could not be verified." });
+      }
+    }
+    // Without signed text, only this message's server-owned attachments are
+    // evidence. A corrupt caption must not make its visible media unreportable.
+    return {
+      version: 2,
+      reportedMessageId: messageId,
+      messages: [
+        {
+          id: messageId,
+          senderId: target.senderId,
+          senderHandle: target.senderHandle,
+          body,
+          attachments: target.attachments,
+          createdAt: target.createdAt.toISOString(),
+        },
+      ],
+    };
+  }
 
   const rows = await db
     .select({
@@ -115,6 +178,7 @@ export async function buildMessageReportSnapshot(
     .where(
       and(
         eq(message.conversationId, target.conversationId),
+        isNull(message.envelope),
         sql`(${message.createdAt}, ${message.id}) <= (${sql.param(target.createdAt, message.createdAt)}, ${messageId})`,
       ),
     )

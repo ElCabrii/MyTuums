@@ -4,6 +4,7 @@ import { createAuth, createEmailSender } from "@my-tuums/auth";
 import { createDatabase } from "@my-tuums/db";
 import {
   createAppealTokenSigner,
+  createMessageRecoveryKeys,
   createR2Storage,
   createStreamService,
   createVideoUploads,
@@ -32,6 +33,7 @@ const configuration = z
     GOOGLE_ANALYTICS: z.enum(["enabled", "disabled"]).default("disabled"),
     BETTER_AUTH_SECRET: z.string().min(32),
     APPEAL_TOKEN_SECRET: z.string().min(32),
+    MESSAGE_RECOVERY_KEYRING: z.string().min(1).optional(),
     STREAM_API_TOKEN: z.string().min(1),
     GOOGLE_CLIENT_ID: z.string().min(1),
     GOOGLE_CLIENT_SECRET: z.string().min(1),
@@ -85,6 +87,9 @@ async function application(env: AppEnv) {
       appealToken: createAppealTokenSigner(config.APPEAL_TOKEN_SECRET),
       emailSender: { send: sendEmail },
       messageNotifier: createMessageNotifier(env.MESSAGE_HUB),
+      messageRecoveryKeys: config.MESSAGE_RECOVERY_KEYRING
+        ? createMessageRecoveryKeys(config.MESSAGE_RECOVERY_KEYRING)
+        : undefined,
       linkTransport: createWorkerLinkTransport(env.LINK_FETCHER),
     },
     messageHub: env.MESSAGE_HUB,

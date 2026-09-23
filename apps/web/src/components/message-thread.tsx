@@ -146,6 +146,7 @@ export function MessageThreadPane({ conversationId }: { conversationId: string }
     if (
       !newest ||
       newest.pending ||
+      newest.decryptionFailed ||
       document.visibilityState !== "visible" ||
       acknowledged.current === newest.id ||
       (lastReadAt !== null && newest.createdAt <= lastReadAt)
@@ -202,6 +203,7 @@ export function MessageThreadPane({ conversationId }: { conversationId: string }
           {m.messages_hidden_notice()}
         </p>
       )}
+      <p className="text-muted-foreground px-4 py-2 text-xs">{m.messages_encryption_notice()}</p>
       <MessageScroll
         items={oldestFirst}
         hasNextPage={thread.hasNextPage}
@@ -393,6 +395,10 @@ function MessageScroll({
                     <LinkedText text={item.body ?? ""} />
                   </>
                 )}
+                {item.decryptionFailed && <p role="alert">{m.messages_decryption_error()}</p>}
+                {!item.envelope && !item.pending && (
+                  <p className="text-xs opacity-70">{m.messages_legacy_notice()}</p>
+                )}
                 <span
                   className={`mt-0.5 block text-right text-[10px] ${
                     mine ? "text-primary-foreground/70" : "text-muted-foreground"
@@ -408,9 +414,16 @@ function MessageScroll({
                 bubble sideways the moment it renders. */}
             <div className="text-muted-foreground ml-1 flex w-7 shrink-0 items-center justify-center self-center opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 motion-reduce:transition-none">
               {mine && item.deletedAt === null && <DeleteOwnAction messageId={item.id} />}
-              {!mine && item.deletedAt === null && (
-                <ReportMessageAction messageId={item.id} body={item.body} />
-              )}
+              {!mine &&
+                item.deletedAt === null &&
+                (!item.decryptionFailed || item.attachments.length > 0) && (
+                  <ReportMessageAction
+                    messageId={item.id}
+                    body={item.body}
+                    disclosure={item.disclosure}
+                    attachments={item.attachments}
+                  />
+                )}
             </div>
           </div>
         );
@@ -445,14 +458,32 @@ function DeleteOwnAction({ messageId }: { messageId: string }) {
   );
 }
 
-function ReportMessageAction({ messageId, body }: { messageId: string; body: string | null }) {
+function ReportMessageAction({
+  messageId,
+  body,
+  disclosure,
+  attachments,
+}: {
+  messageId: string;
+  body: string | null;
+  disclosure?: string;
+  attachments: ThreadItem["attachments"];
+}) {
   const setReport = useSetAtom(reportDialogAtom);
   return (
     <button
       type="button"
       aria-label={m.moderation_report_title_message()}
       title={m.moderation_report_title_message()}
-      onClick={() => setReport({ targetType: "message", targetId: messageId, body })}
+      onClick={() =>
+        setReport({
+          targetType: "message",
+          targetId: messageId,
+          body,
+          disclosure,
+          attachments,
+        })
+      }
       className="hover:text-destructive rounded p-1 transition-colors"
     >
       <Flag className="h-3.5 w-3.5" aria-hidden="true" />
@@ -718,9 +749,13 @@ function Composer({
             });
           }
         },
-        onError: () => {
+        onError: (error) => {
           editDraft(body);
-          toast.error(m.messages_send_error());
+          toast.error(
+            error.message === m.messages_recipient_not_ready()
+              ? m.messages_recipient_not_ready()
+              : m.messages_send_error(),
+          );
           send.reset();
         },
       },

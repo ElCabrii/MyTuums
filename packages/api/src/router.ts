@@ -1,5 +1,6 @@
 import { gameRouter } from "./games.js";
 import { messageRouter } from "./messages.js";
+import { messageKeyRouter } from "./message-keys.js";
 import { moderationRouter } from "./moderation.js";
 import { notificationRouter } from "./notifications.js";
 import { postRouter } from "./posts.js";
@@ -30,6 +31,7 @@ export const appRouter = {
   search: searchRouter,
   notification: notificationRouter,
   message: messageRouter,
+  messageKey: messageKeyRouter,
   moderation: moderationRouter,
   video: videoRouter,
 };

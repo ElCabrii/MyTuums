@@ -270,6 +270,10 @@ local bindings, password auth and captured mail. It has no hosted configuration
 or Access bypass flag. `../src/development-platform.ts` owns resource persistence
 and jobs bindings; see [local development](../../../docs/operations.md#local-development).
 
+## Recoverable messages
+
+`index.ts` injects `MESSAGE_RECOVERY_KEYRING` as an independent Worker secret. Missing configuration disables messaging setup/recovery. Only development/e2e entrypoints import the public synthetic `local-message-recovery.ts` fixture. The deployed Worker itself is trusted to recover history; see [custody and rollout](../../../docs/message-encryption.md).
+
 ## Message media delivery
 
 The application media authorizer routes `messages/` keys through the message

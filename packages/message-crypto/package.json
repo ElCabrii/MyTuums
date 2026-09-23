@@ -1,0 +1,24 @@
+{
+  "name": "@my-tuums/message-crypto",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run"
+  },
+  "dependencies": {
+    "jose": "6.2.5",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@my-tuums/tsconfig": "workspace:*",
+    "@types/node": "catalog:",
+    "@typescript/native": "catalog:",
+    "vitest": "^4.1.10"
+  }
+}

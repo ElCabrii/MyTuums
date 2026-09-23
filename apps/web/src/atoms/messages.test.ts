@@ -1,6 +1,8 @@
+import { createIdentity, publicIdentity, unlockIdentity } from "@my-tuums/message-crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const fakeClient = {
+  messageKey: { identity: vi.fn(), status: vi.fn() },
   message: {
     send: vi.fn(),
     conversations: vi.fn(),
@@ -16,10 +18,9 @@ const fakeClient = {
   },
 };
 
-installTestOrpc(createTanstackQueryUtils(fakeClient));
+installTestClient(fakeClient);
 
-import { createTanstackQueryUtils } from "@orpc/tanstack-query";
-import { installTestOrpc, orpc } from "@/lib/orpc";
+import { installTestClient, orpc } from "@/lib/orpc";
 import {
   acceptRequestAtom,
   deleteMessageAtom,
@@ -73,12 +74,22 @@ function threadItems(conversationId: string): ThreadItem[] {
   return cache.pages[0].items;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   setTestSession(signedInSession({ id: VIEWER }));
   // `sessionAtom` syncs from the auth nanostore only while subscribed
   // (see its onMount); without this, the mutation atoms read a stale
   // viewer id and their optimistic halves never run.
   unsubscribeSession = singletonStore.sub(sessionAtom, () => {});
+  const identity = await createIdentity(VIEWER);
+  const local = await unlockIdentity(identity);
+  const recipient = await createIdentity(OTHER);
+  fakeClient.messageKey.identity.mockResolvedValue(publicIdentity(recipient));
+  fakeClient.messageKey.status.mockResolvedValue({ identity: local.public, recovery: null });
+  singletonQueryClient.setQueryData(["message-access", VIEWER], {
+    local,
+    identity: local.public,
+    recovery: null,
+  });
   fakeClient.message.send.mockReset();
   fakeClient.message.deleteMessage.mockReset();
   fakeClient.message.markRead.mockReset();
@@ -227,8 +238,9 @@ it("a media send rides the wire shape and shows its kind optimistically until th
       voice: voiceFile,
       voiceDurationMs: 4200,
     }),
-    expect.anything(),
   );
+  expect(fakeClient.message.send.mock.calls[0][0]).not.toHaveProperty("body");
+  expect(fakeClient.message.send.mock.calls[0][0]).toHaveProperty("envelope.ciphertext");
   const items = threadItems("c-1");
   expect(items[0].pending).toBeUndefined();
   expect(items[0].pendingMedia).toBeUndefined();
@@ -262,7 +274,13 @@ it("markRead patches the inbox row's unread count from the mutation's answer", a
     lastMessageAt: new Date(),
     lastReadAt: null,
     unreadCount: 2,
-    lastMessage: { senderId: OTHER, body: "hello?", mediaKind: null, createdAt: new Date() },
+    lastMessage: {
+      encrypted: false,
+      senderId: OTHER,
+      body: "hello?",
+      mediaKind: null,
+      createdAt: new Date(),
+    },
     user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
   };
   singletonQueryClient.setQueryData(orpc.message.conversations.key(), {
@@ -287,7 +305,7 @@ it("accepting a request removes its row from the requests feed and restores it o
   const row = {
     conversationId: "c-1",
     lastMessageAt: new Date(),
-    lastMessage: { senderId: OTHER, body: "hi", createdAt: new Date() },
+    lastMessage: { encrypted: false, senderId: OTHER, body: "hi", createdAt: new Date() },
     user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
   };
   singletonQueryClient.setQueryData(orpc.message.requests.key(), {

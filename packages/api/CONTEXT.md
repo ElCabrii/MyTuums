@@ -849,11 +849,16 @@ throughout on purpose.
 - [docs/security.md](../../docs/security.md) — the anonymous surface, rate-limit keys, privacy projection.
 - [docs/product.md](../../docs/product.md) — the vocabulary these procedures implement.
 
+## Recoverable messages
+
+`src/message-keys.ts` owns messaging identity registration and session-bound email recovery; `src/message-recovery-keys.ts` owns the injected provider keyring. New sends accept encrypted envelopes only; reports verify participant-disclosed signed plaintext. See [recoverable message encryption](../../docs/message-encryption.md) for the trust boundary and tests.
+
 ## Private message media
 
-`src/messages.ts` accepts text with at most one attachment group: up to four
+`src/messages.ts` accepts an encrypted text envelope with at most one attachment group: up to four
 images, one voice message, or one already-uploaded Stream video. Media-only
-messages are valid. `src/message-media.ts` owns validation, attachment
+messages have an encrypted empty caption. Attachment bytes retain server-managed
+processing and storage; they are not client-encrypted. `src/message-media.ts` owns validation, attachment
 projection and participant/report authorization; image limits reuse post rules.
 Voice bytes are capped at 10 MB and container-sniffed; duration is a bounded
 client measurement, not a server-verified playback length.

@@ -1,3 +1,4 @@
+import { MessageAccess } from "@/components/message-access";
 import { messagePreview } from "@/lib/message-preview";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
@@ -21,6 +22,14 @@ import { m } from "@/paraglide/messages.js";
  * route, and a thread opens as its own sub-route over it.
  */
 export function MessagesPage() {
+  return (
+    <MessageAccess>
+      <UnlockedMessagesPage />
+    </MessageAccess>
+  );
+}
+
+function UnlockedMessagesPage() {
   // The placeholder fills the right half only when no sub-route is open —
   // with a thread, a request page or the draft composer mounted, the outlet
   // owns that half outright.

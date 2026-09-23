@@ -278,3 +278,7 @@ captures synthetic messages; it is not evidence of hosted email delivery.
 
 - [docs/architecture.md](../../docs/architecture.md) — auth, sessions, and the build-time versus runtime provider split.
 - [docs/security.md](../../docs/security.md) — session, linking and rate-limit controls.
+
+## Recoverable messages
+
+`messageRecoveryEmail` renders the fresh messaging-recovery code with an explicit history-access notice. Recovery verification lives in the API, preserving normal sign-in and two-factor requirements; see [the chosen email-recovery policy](../../docs/message-encryption.md).

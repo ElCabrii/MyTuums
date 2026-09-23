@@ -1,6 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { test, expect } from "../../support/fixtures";
-import { BOB } from "../../support/users";
+import { unlockMessages } from "../../support/messages";
+import { E2E_SERVER_ORIGIN, E2E_WEB_ORIGIN } from "../../constants";
+import { uniqueUser, BOB } from "../../support/users";
 import { testPlatform } from "../../support/platform";
 import { E2E_STREAM_ORIGIN, streamFixtureKey, streamFixtureUpload } from "../../stream-fixture";
 
@@ -12,6 +14,18 @@ test("message images, recorded voice and video survive send and recipient reload
   db,
 }) => {
   test.setTimeout(90_000);
+  // A dedicated sender keeps this attachment journey out of Alice's recovery
+  // budget; the recovery specs deliberately consume her real hourly allowance.
+  const sender = uniqueUser("media");
+  await db.createUser(sender);
+  await page.context().clearCookies();
+  const login = await page.request.post(`${E2E_SERVER_ORIGIN}/api/auth/sign-in/email`, {
+    headers: { Origin: E2E_WEB_ORIGIN },
+    data: { email: sender.email, password: sender.password },
+  });
+  expect(login.ok()).toBe(true);
+  await unlockMessages(page, sender.email);
+  await unlockMessages(bobPage, BOB.email);
   const bobId = await db.getUserId(BOB.username);
   await page.goto(`/messages/new/${bobId}`);
   const png = Buffer.from(

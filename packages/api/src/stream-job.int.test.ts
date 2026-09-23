@@ -204,7 +204,13 @@ async function pendingMessageVideo() {
       { conversationId, userId: sender.id, status: "active" },
       { conversationId, userId: recipient.id, status: "active" },
     ]),
-    db.insert(message).values({ id: messageId, conversationId, senderId: sender.id, body: "" }),
+    db.insert(message).values({
+      id: messageId,
+      conversationId,
+      senderId: sender.id,
+      body: "[encrypted]",
+      envelope: "{}",
+    }),
     db.insert(video).values({
       id: videoId,
       authorId: sender.id,
