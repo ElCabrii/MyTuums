@@ -134,7 +134,7 @@ function ConversationList() {
   const items = feed.data?.pages.flatMap((page) => page.items) ?? [];
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 pb-6">
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 pb-6">
       <PaginatedState
         query={feed}
         errorMessage={m.messages_load_error()}

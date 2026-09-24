@@ -203,7 +203,6 @@ export function MessageThreadPane({ conversationId }: { conversationId: string }
           {m.messages_hidden_notice()}
         </p>
       )}
-      <p className="text-muted-foreground px-4 py-2 text-xs">{m.messages_encryption_notice()}</p>
       <MessageScroll
         items={oldestFirst}
         hasNextPage={thread.hasNextPage}
@@ -243,7 +242,7 @@ function ThreadHeader({
     // DOWN into the pane (the overflow-hidden layout is a scrollport that
     // never scrolls, so the sticky constraint pushes instead of pins),
     // covering the first messages exactly as far as it moved.
-    <header className="border-border bg-background flex items-center gap-3 border-b px-4 py-3">
+    <header className="border-border bg-background flex shrink-0 items-center gap-3 border-b px-4 py-3">
       <Button
         variant="ghost"
         size="icon"
@@ -357,7 +356,7 @@ function MessageScroll({
         const element = event.currentTarget;
         pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
       }}
-      className="flex-1 space-y-1 overflow-y-auto px-4 py-4"
+      className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-y-contain px-4 py-4"
     >
       {hasNextPage && (
         <div className="flex justify-center pb-2">
@@ -766,7 +765,7 @@ function Composer({
     // A plain flex child at the pane's bottom: the /messages layout bounds
     // the pane to the visible area, so the composer sits above the mobile
     // tab bar by construction — nothing scrolls under it.
-    <footer className="border-border bg-background border-t p-3">
+    <footer className="border-border bg-background shrink-0 border-t p-3">
       {images.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
           {images.map((attachment) => (
@@ -884,7 +883,7 @@ function Composer({
           }}
           placeholder={m.messages_composer_placeholder()}
           aria-label={m.messages_composer_placeholder()}
-          className="max-h-32 min-h-9 min-w-0 flex-1 resize-none bg-transparent px-2 text-sm outline-none"
+          className="field-sizing-content max-h-32 min-h-9 min-w-0 flex-1 resize-none overflow-y-auto overscroll-y-contain bg-transparent px-2 py-2 text-base leading-5 outline-none md:text-sm"
         />
         <Button
           size="icon"

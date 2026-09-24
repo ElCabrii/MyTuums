@@ -410,6 +410,13 @@ build cache key. The branding build shares this plugin.
 
 ## Message attachments
 
+The app shell and messages pane both use the dynamic viewport height. Mixing
+`100vh` on the shell with `100dvh` on the pane creates document scroll when
+mobile browser chrome is visible and detaches the composer from the fixed
+navigation. The navigation reservation includes its border and safe-area inset;
+message lists contain overscroll, while thread headers and composers do not
+shrink. The composer centers a single text line and grows up to its height cap.
+
 `src/components/message-thread.tsx` owns the recipient-scoped composer: up to
 four images, one voice message, or one video, optionally with text. Image
 acceptance/re-encoding, the media picker and Stream upload atoms are shared

@@ -25,7 +25,7 @@ export function MessageRequestsPage() {
   return (
     // Scrolls inside the bounded /messages pane — the route never scrolls
     // the document (see MessagesPage).
-    <div className="h-full overflow-y-auto">
+    <div className="h-full overflow-y-auto overscroll-y-contain">
       <div className="mx-auto w-full max-w-2xl px-4 py-8">
         <h1 className="text-lg font-bold tracking-tight">{m.messages_requests()}</h1>
         <p className="text-muted-foreground mt-1 mb-4 text-sm">{m.messages_requests_intro()}</p>
