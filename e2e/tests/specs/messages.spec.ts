@@ -1,7 +1,8 @@
 import { unlockMessages } from "../../support/messages";
 import { openSessionAs, test, expect } from "../../support/fixtures";
 import type { Page } from "@playwright/test";
-import { ALICE, BOB } from "../../support/users";
+import { ALICE, BOB, uniqueUser } from "../../support/users";
+import { E2E_SERVER_ORIGIN, E2E_WEB_ORIGIN } from "../../constants";
 
 /**
  * The private-messages journey (issue #408): bob's first message to alice —
@@ -23,6 +24,83 @@ async function unreadOnMail(page: Page): Promise<number> {
 }
 
 test.describe("messages", () => {
+  test("mobile scrolling keeps the composer against navigation and its single line centered", async ({
+    page,
+    bobPage,
+    db,
+  }) => {
+    await page.setViewportSize({ width: 393, height: 760 });
+    // Layout checks must not consume the recovery journeys' hourly allowance.
+    const sender = uniqueUser("layout");
+    const recipient = uniqueUser("recipient");
+    for (const [target, user] of [
+      [page, sender],
+      [bobPage, recipient],
+    ] as const) {
+      await db.createUser(user);
+      await target.context().clearCookies();
+      const login = await target.request.post(`${E2E_SERVER_ORIGIN}/api/auth/sign-in/email`, {
+        headers: { Origin: E2E_WEB_ORIGIN },
+        data: { email: user.email, password: user.password },
+      });
+      expect(login.ok()).toBe(true);
+      await unlockMessages(target, user.email);
+    }
+    await page.goto(`/messages/new/${await db.getUserId(recipient.username)}`);
+    const composer = page.getByRole("textbox", { name: "Write a message" });
+    await expect(composer).toBeVisible();
+
+    // Desktop Chromium has no collapsing address bar: model mobile's large
+    // viewport being 80px taller than its visible (dynamic) viewport. Keep
+    // this override limited to Tailwind's actual 100vh utility.
+    await page.addStyleTag({ content: ".min-h-screen { min-height: calc(100dvh + 80px); }" });
+    const message = Array.from({ length: 35 }, (_, i) => `Mobile scroll regression line ${i}`).join(
+      "\n",
+    );
+    await composer.fill(message);
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(
+      page.locator("section").getByText(/Mobile scroll regression line 34/),
+    ).toBeVisible();
+    await expect(composer).toHaveValue("");
+
+    const navigation = page
+      .getByRole("navigation", { name: "Primary navigation", includeHidden: true })
+      .last();
+    const footer = page.locator("main footer");
+    for (const height of [760, 480, 840]) {
+      await page.setViewportSize({ width: 393, height });
+      await page.mouse.move(190, 220);
+      await page.mouse.wheel(0, 2000);
+      await expect
+        .poll(async () => {
+          const bottom = await footer.boundingBox();
+          const nav = await navigation.boundingBox();
+          return bottom && nav ? Math.abs(nav.y - bottom.y - bottom.height) : Infinity;
+        })
+        .toBeLessThanOrEqual(1);
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    }
+
+    const lineOffset = await composer.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const lineCenter = parseFloat(style.paddingTop) + parseFloat(style.lineHeight) / 2;
+      return Math.abs(element.clientHeight / 2 - lineCenter);
+    });
+    expect(lineOffset, "The empty message line should be vertically centered").toBeLessThanOrEqual(
+      1,
+    );
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(navigation).toBeHidden();
+    await expect
+      .poll(async () => {
+        const bounds = await footer.boundingBox();
+        return bounds ? Math.abs(800 - bounds.y - bounds.height) : Infinity;
+      })
+      .toBeLessThanOrEqual(1);
+  });
+
   test("a first message lands as a request, accepting moves it to the inbox, and the reply arrives live", async ({
     page,
     bobPage,

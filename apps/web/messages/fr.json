@@ -1042,7 +1042,6 @@
   "messages_decryption_error": "Ce message chiffré n’a pas pu être vérifié ou déchiffré.",
   "messages_recipient_not_ready": "Cette personne doit activer la messagerie chiffrée avant que vous puissiez lui écrire.",
   "messages_report_disclosure": "Ce signalement partage le texte déchiffré et les pièces jointes du message sélectionné avec la modération. Les autres messages chiffrés restent privés.",
-  "messages_encryption_notice": "Texte chiffré • Médias accessibles à MyTuums • Historique récupérable",
   "messages_report_attachments_only": "Ce signalement partage uniquement les pièces jointes de ce message avec la modération. Son texte chiffré n’a pas pu être lu et ne sera pas inclus.",
   "messages_attachment_remove": "Supprimer la pièce jointe"
 }
