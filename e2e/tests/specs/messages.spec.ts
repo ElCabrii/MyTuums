@@ -1,5 +1,5 @@
 import { unlockMessages } from "../../support/messages";
-import { openSessionAs, test, expect } from "../../support/fixtures";
+import { test, expect } from "../../support/fixtures";
 import type { Page } from "@playwright/test";
 import { ALICE, BOB, uniqueUser } from "../../support/users";
 import { E2E_SERVER_ORIGIN, E2E_WEB_ORIGIN } from "../../constants";
@@ -222,42 +222,59 @@ test.describe("messages: multi-session", () => {
     bobPage,
     browser,
     db,
-  }, testInfo) => {
-    const aliceId = await db.getUserId(ALICE.username);
-    const bobId = await db.getUserId(BOB.username);
-    await db.deleteConversationBetween(aliceId, bobId);
-    await unlockMessages(page, ALICE.email);
-    await unlockMessages(bobPage, BOB.email);
-    // The sender's other device shares the same hub: one account, two live
-    // sessions, the same conversation open in the second one.
-    const secondSession = await openSessionAs(browser, "alice", testInfo);
+  }) => {
+    // Earlier signed-in journeys prepare Alice's keys automatically. Reusing
+    // her account here would spend a fourth recovery email in the full suite.
+    const sender = uniqueUser("syncsender");
+    const recipient = uniqueUser("syncrecipient");
+    for (const [target, user] of [
+      [page, sender],
+      [bobPage, recipient],
+    ] as const) {
+      await db.createUser(user);
+      await target.context().clearCookies();
+      const login = await target.request.post(`${E2E_SERVER_ORIGIN}/api/auth/sign-in/email`, {
+        headers: { Origin: E2E_WEB_ORIGIN },
+        data: { email: user.email, password: user.password },
+      });
+      expect(login.ok()).toBe(true);
+      await unlockMessages(target, user.email);
+    }
+    const senderId = await db.getUserId(sender.username);
+    const recipientId = await db.getUserId(recipient.username);
+    // Carry authentication and UI preferences into another browser, but no
+    // IndexedDB keys: this device must recover the sender's existing identity.
+    const secondContext = await browser.newContext({
+      storageState: await page.context().storageState({ indexedDB: false }),
+    });
+    const secondSession = await secondContext.newPage();
 
     try {
-      // An inbox thread for alice: she follows bob, he writes. The follow is
-      // seeded directly — a UI click races bob's send for the edge commit,
+      // The sender follows the recipient, who opens an inbox thread. The follow is
+      // seeded directly — a UI click races the opening message for the edge commit,
       // and losing it lands the thread in requests instead of the inbox.
-      await db.seedFollow(aliceId, bobId);
+      await db.seedFollow(senderId, recipientId);
 
-      const opener = `from bob ${Date.now()}`;
-      await bobPage.goto(`/@${ALICE.username}`);
+      const opener = `from recipient ${Date.now()}`;
+      await bobPage.goto(`/@${sender.username}`);
       await bobPage.getByRole("button", { name: "More", exact: true }).first().click();
       await bobPage.getByRole("menuitem", { name: "Message" }).click();
       await bobPage.getByRole("textbox", { name: "Write a message" }).fill(opener);
       await bobPage.keyboard.press("Enter");
 
-      // Both alice sessions open the thread from the inbox.
+      // Both sender sessions open the thread from the inbox.
       const openThread = async (target: Page) => {
         await target.goto("/messages");
-        const row = target.getByRole("button", { name: new RegExp(BOB.name) }).first();
+        const row = target.getByRole("button", { name: new RegExp(recipient.name) }).first();
         await expect(row).toBeVisible();
         await row.click();
         await expect(target.locator("section").getByText(opener)).toBeVisible();
       };
-      await unlockMessages(secondSession, ALICE.email);
+      await unlockMessages(secondSession, sender.email);
       await openThread(secondSession);
       await openThread(page);
 
-      // Alice sends from the FIRST session; the second one receives it over
+      // The sender writes from the FIRST session; the second one receives it over
       // the event stream — no reload.
       const fromOtherSession = `from the other session ${Date.now()}`;
       await page.getByRole("textbox", { name: "Write a message" }).fill(fromOtherSession);
@@ -267,7 +284,7 @@ test.describe("messages: multi-session", () => {
         timeout: 10_000,
       });
     } finally {
-      await secondSession.close();
+      await secondContext.close();
     }
   });
 });

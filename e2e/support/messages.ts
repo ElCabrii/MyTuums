@@ -14,7 +14,14 @@ export async function unlockMessages(page: Page, email: string) {
     const before = new Set(
       (await bucket.list({ prefix: "__e2e_emails/" })).objects.map((entry) => entry.key),
     );
+    const recoveryResponse = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/rpc/messageKey/requestRecovery",
+    );
     await recover.click();
+    expect(
+      (await recoveryResponse).status(),
+      "Recovery request must succeed before waiting for mail",
+    ).toBe(200);
     let code: string | null = null;
     await expect
       .poll(async () => {
