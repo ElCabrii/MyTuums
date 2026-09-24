@@ -24,6 +24,37 @@ async function unreadOnMail(page: Page): Promise<number> {
 }
 
 test.describe("messages", () => {
+  test("visiting Home prepares messaging automatically across simultaneous tabs", async ({
+    page,
+    db,
+  }) => {
+    const user = uniqueUser("autokeys");
+    await db.createUser(user);
+    await page.context().clearCookies();
+    const login = await page.request.post(`${E2E_SERVER_ORIGIN}/api/auth/sign-in/email`, {
+      headers: { Origin: E2E_WEB_ORIGIN },
+      data: { email: user.email, password: user.password },
+    });
+    expect(login.ok()).toBe(true);
+    const otherTab = await page.context().newPage();
+    try {
+      const registration = page.context().waitForEvent("response", {
+        predicate: (response) => response.url().endsWith("/rpc/messageKey/register"),
+      });
+      await Promise.all([page.goto("/"), otherTab.goto("/")]);
+      expect((await registration).ok()).toBe(true);
+      for (const tab of [page, otherTab]) {
+        await tab.getByRole("button", { name: "Messages", exact: true }).click();
+        await expect(tab.getByRole("heading", { name: "Messages", exact: true })).toBeVisible();
+        await expect(
+          tab.getByRole("button", { name: "Recover message history by email" }),
+        ).toHaveCount(0);
+      }
+    } finally {
+      await otherTab.close();
+    }
+  });
+
   test("mobile scrolling keeps the composer against navigation and its single line centered", async ({
     page,
     bobPage,

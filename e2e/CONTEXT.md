@@ -116,4 +116,4 @@ ignored. Never commit captured messages, cookies, keys or local database files.
 
 ## Recoverable messages
 
-`tests/specs/messages.spec.ts` covers browser key setup, encrypted cross-session delivery and recovery after local keys are removed. Recovery codes come only from captured local R2 mail. The public synthetic recovery key is confined to development/e2e composition.
+`tests/specs/messages.spec.ts` covers automatic key setup from Home across simultaneous tabs, encrypted cross-session delivery and recovery after local keys are removed. Recovery codes come only from captured local R2 mail. The public synthetic recovery key is confined to development/e2e composition.
