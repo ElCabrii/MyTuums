@@ -12,7 +12,7 @@ import {
   check,
   type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
-import { user } from "./auth.js";
+import { session, user } from "./auth.js";
 
 /** Committed scheduling obligations survive request crashes and owner deletion. */
 export const jobIntent = sqliteTable(
@@ -1853,3 +1853,47 @@ export const feedRankSnapshot = sqliteTable(
 export const feedRankSnapshotRelations = relations(feedRankSnapshot, ({ one }) => ({
   viewer: one(user, { fields: [feedRankSnapshot.viewerId], references: [user.id] }),
 }));
+
+/** A browser subscription belongs to one login; revocation cascades on sign-out. */
+export const pushSubscription = sqliteTable(
+  "push_subscription",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => session.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull(),
+    applicationServerKey: text("application_server_key").notNull(),
+  },
+  (t) => [
+    uniqueIndex("push_subscription_endpoint_idx").on(t.endpoint),
+    uniqueIndex("push_subscription_session_idx").on(t.sessionId),
+    index("push_subscription_user_idx").on(t.userId),
+  ],
+);
+
+/** The notification-insert trigger commits delivery obligations with the event. */
+export const pushDelivery = sqliteTable(
+  "push_delivery",
+  {
+    subscriptionId: text("subscription_id")
+      .notNull()
+      .references(() => pushSubscription.id, { onDelete: "cascade" }),
+    notificationId: text("notification_id")
+      .notNull()
+      .references(() => notification.id, { onDelete: "cascade" }),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: integer("next_attempt_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`),
+    lease: text("lease"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.subscriptionId, t.notificationId] }),
+    index("push_delivery_due_idx").on(t.nextAttemptAt),
+    index("push_delivery_notification_idx").on(t.notificationId),
+  ],
+);

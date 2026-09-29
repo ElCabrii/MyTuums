@@ -656,3 +656,13 @@ E2EE claim. D1 holds encrypted bodies and wrapped identity backups; the same
 application Worker holds the recovery secret. Account/email or Worker compromise
 can expose history. There is no forward secrecy or per-device revocation.
 See [the complete design, boundaries and rollout](message-encryption.md).
+
+## Browser notification subscriptions
+
+Browser push is explicit opt-in and belongs to one login session. Session revocation
+cascades to the endpoint and queued deliveries; the sender separately enforces expiry,
+recipient bans and the inbox's current visibility/read state. Provider URLs are
+restricted to the supported HTTPS push services, with redirects refused. Pushes
+contain no user content and display a generic inbox alert. An already-accepted
+provider message can outlive logout briefly. See [browser notifications](browser-notifications.md)
+for key custody, delivery semantics and the endpoint allowlist.

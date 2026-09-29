@@ -1,3 +1,4 @@
+import { BrowserPushSettings } from "@/components/browser-push-settings";
 import { ResponsiveDialogContent } from "@/components/responsive-dialog-content";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
@@ -127,6 +128,7 @@ export function NotificationsPage() {
           </Button>
         )}
       </div>
+      <BrowserPushSettings />
       {deleteNotification.isError && (
         <div className="flex items-center justify-between gap-2">
           <p role="alert" className="text-destructive text-xs">

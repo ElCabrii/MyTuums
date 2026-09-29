@@ -1043,5 +1043,16 @@
   "messages_recipient_not_ready": "This person needs to enable encrypted messaging before you can send them a message.",
   "messages_report_disclosure": "Sending this report shares the selected message’s decrypted text and attachments with moderators. Other encrypted messages stay private.",
   "messages_report_attachments_only": "This report shares only this message’s attachments with moderators. Its encrypted text could not be read and will not be included.",
-  "messages_attachment_remove": "Remove attachment"
+  "messages_attachment_remove": "Remove attachment",
+  "push_title": "Browser notifications",
+  "push_description": "Get a private alert for new activity, even when MyTuums is closed. Applies to this browser while you are signed in.",
+  "push_enabled": "Enabled for this browser. Alerts open your notification inbox.",
+  "push_enable": "Enable notifications",
+  "push_disable": "Turn off",
+  "push_pending": "Updating…",
+  "push_unsupported": "Use a browser that supports push notifications. On iPhone or iPad, add MyTuums to your Home Screen and open it there first.",
+  "push_blocked": "Notifications are blocked. Allow them in your browser or device settings, then return here.",
+  "push_unavailable": "Browser notifications are not available yet. If you just updated the app, close all MyTuums tabs and reopen it.",
+  "push_error": "Could not update notifications. Please try again.",
+  "push_notification_body": "You have new notifications."
 }

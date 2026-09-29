@@ -33,6 +33,10 @@ const configuration = z
     GOOGLE_ANALYTICS: z.enum(["enabled", "disabled"]).default("disabled"),
     BETTER_AUTH_SECRET: z.string().min(32),
     APPEAL_TOKEN_SECRET: z.string().min(32),
+    WEB_PUSH_PUBLIC_KEY: z
+      .string()
+      .regex(/^B[A-Za-z0-9_-]{86}$/)
+      .optional(),
     MESSAGE_RECOVERY_KEYRING: z.string().min(1).optional(),
     STREAM_API_TOKEN: z.string().min(1),
     GOOGLE_CLIENT_ID: z.string().min(1),
@@ -80,6 +84,7 @@ async function application(env: AppEnv) {
     services: {
       db,
       webOrigin: config.WEB_ORIGIN,
+      webPushPublicKey: config.WEB_PUSH_PUBLIC_KEY,
       storage: createR2Storage(env.MEDIA),
       videoUploads: createVideoUploads(db, stream, jobs),
       videoJobs: jobs,

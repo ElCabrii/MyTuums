@@ -149,6 +149,7 @@ The router's top-level groups:
 - `user` — `byUsername`, `uploadImage`, `removeImage`, `follow`, `unfollow`, `followers`, `following`
 - `game` — `bySlug`, `list` (public: the `/games` directory, issue #314)
 - `search` — `typeahead`, `users`, `posts`
+- `push` — session-bound browser notification status, subscribe and unsubscribe
 - `notification` — `list`, `unreadCount`, `markRead`
 - `messageKey` — public identities, encryption setup and session-bound email recovery
 - `message` — `send`, `conversations`, `requests`, `thread`, `accept`, `decline`, `hide`, `markRead`, `unreadCount`, `deleteMessage`, `conversationWith` (private messages, issue #408)

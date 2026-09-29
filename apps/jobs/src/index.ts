@@ -24,7 +24,11 @@ import {
   deliverModerationEmails,
   createEmailSender,
   createAppealTokenSigner,
+  createPushSender,
+  deliverPushNotifications,
 } from "@my-tuums/api/cloudflare-jobs";
+
+type JobsEnv = Env & { WEB_PUSH_PRIVATE_JWK?: string };
 
 type JobParams = { entityId: string };
 
@@ -37,7 +41,7 @@ function streamService(env: Env) {
   });
 }
 
-export class VideoWorkflow extends WorkflowEntrypoint<Env, JobParams> {
+export class VideoWorkflow extends WorkflowEntrypoint<JobsEnv, JobParams> {
   async run(event: WorkflowEvent<JobParams>, step: WorkflowStep) {
     const id = event.payload.entityId;
     // Check external invocations before interpolating identifiers into step names or logs.
@@ -98,7 +102,7 @@ export class VideoWorkflow extends WorkflowEntrypoint<Env, JobParams> {
   }
 }
 
-export class GameSyncWorkflow extends WorkflowEntrypoint<Env, JobParams> {
+export class GameSyncWorkflow extends WorkflowEntrypoint<JobsEnv, JobParams> {
   async run(event: WorkflowEvent<JobParams>, step: WorkflowStep) {
     const match = /^games-(\d{13})$/.exec(event.payload.entityId);
     if (!match) throw new Error("Invalid game sync identifier.");
@@ -134,7 +138,7 @@ export class GameSyncWorkflow extends WorkflowEntrypoint<Env, JobParams> {
   }
 }
 
-export class MaintenanceWorkflow extends WorkflowEntrypoint<Env, JobParams> {
+export class MaintenanceWorkflow extends WorkflowEntrypoint<JobsEnv, JobParams> {
   async run(event: WorkflowEvent<JobParams>, step: WorkflowStep) {
     const entityId = event.payload.entityId;
     const prune = /^prune-(\d{13})-(\d{1,9})$/.exec(entityId);
@@ -241,6 +245,18 @@ export class MaintenanceWorkflow extends WorkflowEntrypoint<Env, JobParams> {
           }
         },
       );
+      // Optional push configuration must not prevent the existing maintenance steps.
+      const pushPrivateKey = this.env.WEB_PUSH_PRIVATE_JWK;
+      if (pushPrivateKey) {
+        await step.do("deliver-browser-push", { timeout: "3 minutes" }, async () => {
+          try {
+            const sender = await createPushSender(pushPrivateKey, `mailto:${this.env.EMAIL_FROM}`);
+            return await deliverPushNotifications(db, sender);
+          } catch {
+            throw new Error("Browser push delivery is temporarily unavailable.");
+          }
+        });
+      }
     }
     return { jobId: entityId };
   }
@@ -282,4 +298,4 @@ export default {
       throw new Error("Scheduled job recovery is temporarily unavailable.");
     }
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<JobsEnv>;

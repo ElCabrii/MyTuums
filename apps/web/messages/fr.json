@@ -1043,5 +1043,16 @@
   "messages_recipient_not_ready": "Cette personne doit activer la messagerie chiffrée avant que vous puissiez lui écrire.",
   "messages_report_disclosure": "Ce signalement partage le texte déchiffré et les pièces jointes du message sélectionné avec la modération. Les autres messages chiffrés restent privés.",
   "messages_report_attachments_only": "Ce signalement partage uniquement les pièces jointes de ce message avec la modération. Son texte chiffré n’a pas pu être lu et ne sera pas inclus.",
-  "messages_attachment_remove": "Supprimer la pièce jointe"
+  "messages_attachment_remove": "Supprimer la pièce jointe",
+  "push_title": "Notifications du navigateur",
+  "push_description": "Recevez une alerte privée pour les nouvelles activités, même lorsque MyTuums est fermé. Ce réglage s’applique à ce navigateur tant que vous êtes connecté.",
+  "push_enabled": "Activées pour ce navigateur. Les alertes ouvrent votre boîte de notifications.",
+  "push_enable": "Activer les notifications",
+  "push_disable": "Désactiver",
+  "push_pending": "Mise à jour…",
+  "push_unsupported": "Utilisez un navigateur compatible avec les notifications push. Sur iPhone ou iPad, ajoutez MyTuums à votre écran d’accueil et ouvrez-le depuis celui-ci.",
+  "push_blocked": "Les notifications sont bloquées. Autorisez-les dans les réglages de votre navigateur ou appareil, puis revenez ici.",
+  "push_unavailable": "Les notifications du navigateur ne sont pas encore disponibles. Si vous venez de mettre l’application à jour, fermez tous les onglets MyTuums puis rouvrez-la.",
+  "push_error": "Impossible de modifier les notifications. Veuillez réessayer.",
+  "push_notification_body": "Vous avez de nouvelles notifications."
 }

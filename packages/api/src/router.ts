@@ -2,6 +2,7 @@ import { gameRouter } from "./games.js";
 import { messageRouter } from "./messages.js";
 import { messageKeyRouter } from "./message-keys.js";
 import { moderationRouter } from "./moderation.js";
+import { pushRouter } from "./push.js";
 import { notificationRouter } from "./notifications.js";
 import { postRouter } from "./posts.js";
 import { searchRouter } from "./search.js";
@@ -30,6 +31,7 @@ export const appRouter = {
   game: gameRouter,
   search: searchRouter,
   notification: notificationRouter,
+  push: pushRouter,
   message: messageRouter,
   messageKey: messageKeyRouter,
   moderation: moderationRouter,
