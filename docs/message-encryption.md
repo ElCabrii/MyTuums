@@ -5,7 +5,24 @@ participants' browsers. **This is not provider-inaccessible end-to-end encryptio
 The chosen recovery policy lets a signed-in user recover history using their
 verified email, without a separate passphrase, recovery key or existing device.
 To provide that, MyTuums holds a recovery key capable of unlocking account keys
-and message history. The UI describes this before setup and recovery.
+and message history. The recovery screen describes these privacy limits.
+
+## Default activation
+
+Messaging keys are prepared automatically when a signed-in user opens any page
+of the app after completing onboarding and accepting the current terms. There
+is no activation button or plaintext sending mode. This applies to new accounts
+and existing accounts on their first visit after rollout. An account that has
+not visited the updated app still has no public messaging key and cannot receive
+messages yet; no server-side backfill provisions keys for absent users.
+
+The account-scoped access query performs idempotent initialization. A browser
+lock serializes registration and local persistence across tabs. The server's
+immutable identity remains authoritative if different devices race; the losing
+device requires email recovery. Existing identities are never replaced, and a
+new browser or cleared site data still requires explicit email recovery. No
+recovery email is sent merely by signing in. A setup failure leaves a retry in
+Messages without blocking other pages or falling back to plaintext.
 
 ## Ownership and protocol
 

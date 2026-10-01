@@ -13,6 +13,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { resolvedThemeAtom, themeClassEffect } from "@/atoms/theme";
 import { localeDocumentEffect, localePreferenceEffect } from "@/atoms/locale";
 import { isSignedInAtom, sessionSettledAtom, sessionSettledEffect } from "@/atoms/session";
+import { messageAccessAtom } from "@/atoms/message-access";
 import { useMessageEvents } from "@/hooks/use-message-events";
 import { useRequireHandle } from "@/hooks/use-require-handle";
 import { useRequireSignedIn } from "@/hooks/use-require-signed-in";
@@ -66,6 +67,11 @@ function RootLayout() {
   // outlive any one route. Opens only once the protected product is ready
   // and closes when the signed-in tree unmounts (sign-out included).
   useMessageEvents();
+
+  // Initialize messaging on any signed-in page, once consent and onboarding
+  // are complete. Missing local keys for an existing identity still require
+  // email recovery, shown only when the user opens Messages.
+  useAtomValue(messageAccessAtom);
 
   // All reads live above the splash branch below — a hook called after a
   // conditional return would be a rules-of-hooks violation the moment the
