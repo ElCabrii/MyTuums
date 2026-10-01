@@ -19,36 +19,64 @@ export const messageAccessAtom = atomWithQuery((get) => {
     queryKey: ["message-access", userId],
     enabled: get(protectedProductReadyAtom) && userId !== null,
     retry: false,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!userId) throw new Error("Sign in to open messages.");
-      const status = await client.messageKey.status();
-      const local = await readMessageKey(userId);
-      const matches =
-        local &&
-        status.identity &&
-        (await identityFingerprint(local.public)) === (await identityFingerprint(status.identity));
-      return { ...status, local: matches ? local : null };
+      const assertCurrentUser = () => {
+        signal.throwIfAborted();
+        if (get(viewerIdAtom) !== userId || !get(protectedProductReadyAtom)) {
+          throw new Error("Your session changed.");
+        }
+      };
+      const initialize = async () => {
+        assertCurrentUser();
+        let status = await client.messageKey.status();
+        let local = await readMessageKey(userId);
+        assertCurrentUser();
+        if (!status.identity && status.recovery) {
+          const identity = await createIdentity(userId);
+          const backup = await encryptRecoveryBackup(identity, status.recovery.publicKey);
+          const candidate = publicIdentity(identity);
+          assertCurrentUser();
+          try {
+            await client.messageKey.register({
+              identity: candidate,
+              backup,
+              recoveryKeyId: status.recovery.id,
+            });
+            status = { ...status, identity: candidate };
+          } catch (error) {
+            // Another device may have registered first, or our successful
+            // registration response was lost. The server identity wins.
+            assertCurrentUser();
+            status = await client.messageKey.status();
+            if (!status.identity) throw error;
+          }
+          if (
+            status.identity &&
+            (await identityFingerprint(candidate)) === (await identityFingerprint(status.identity))
+          ) {
+            local = await unlockIdentity(identity);
+            // Finish saving an accepted registration even if the query was
+            // cancelled meanwhile; the keys remain scoped to the original user.
+            await writeMessageKey(local);
+          }
+        }
+        assertCurrentUser();
+        const matches =
+          local &&
+          status.identity &&
+          (await identityFingerprint(local.public)) ===
+            (await identityFingerprint(status.identity));
+        return { ...status, local: matches ? local : null };
+      };
+      // Tabs share IndexedDB. Hold the lock across registration AND storage so
+      // a second tab reads the winning keys instead of requesting recovery.
+      return navigator.locks
+        ? navigator.locks.request(`mytuums-message-keys:${userId}`, { signal }, initialize)
+        : initialize();
     },
   };
 });
-
-export const setupMessageKeysAtom = atomWithMutation((get) => ({
-  mutationFn: async () => {
-    const userId = get(viewerIdAtom);
-    const status = get(messageAccessAtom).data;
-    if (!userId || !status?.recovery) throw new Error("Encryption setup is unavailable.");
-    const identity = await createIdentity(userId);
-    const backup = await encryptRecoveryBackup(identity, status.recovery.publicKey);
-    await client.messageKey.register({
-      identity: publicIdentity(identity),
-      backup,
-      recoveryKeyId: status.recovery.id,
-    });
-    if (get(viewerIdAtom) !== userId) throw new Error("Your session changed.");
-    await writeMessageKey(await unlockIdentity(identity));
-  },
-  onSuccess: () => get(queryClientAtom).invalidateQueries({ queryKey: ["message-access"] }),
-}));
 
 interface RecoveryRequest {
   id: string;

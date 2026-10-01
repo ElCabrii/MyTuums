@@ -6,7 +6,6 @@ import {
   messageAccessAtom,
   recoverMessageKeysAtom,
   requestMessageRecoveryAtom,
-  setupMessageKeysAtom,
 } from "@/atoms/message-access";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,14 +13,13 @@ import { m } from "@/paraglide/messages.js";
 
 export function MessageAccess({ children }: { children: ReactNode }) {
   const access = useAtomValue(messageAccessAtom);
-  const setup = useAtomValue(setupMessageKeysAtom);
   const request = useAtomValue(requestMessageRecoveryAtom);
   const recover = useAtomValue(recoverMessageKeysAtom);
   const [code, setCode] = useState("");
   if (access.data?.local) return children;
-  const existing = access.data?.identity !== null;
-  const busy = access.isPending || setup.isPending || request.isPending || recover.isPending;
-  const error = access.isError || setup.isError || request.isError || recover.isError;
+  const existing = !!access.data?.identity;
+  const busy = access.isPending || request.isPending || recover.isPending;
+  const error = access.isError || request.isError || recover.isError;
   return (
     <section className="mx-auto flex w-full max-w-lg flex-col gap-4 px-6 py-12">
       <LockKeyhole className="size-8" aria-hidden="true" />
@@ -34,12 +32,7 @@ export function MessageAccess({ children }: { children: ReactNode }) {
           {m.messages_encryption_error()}
         </p>
       )}
-      {!access.isPending && !access.data?.recovery && <p>{m.messages_encryption_unavailable()}</p>}
-      {access.data?.recovery && !existing && (
-        <Button disabled={busy} onClick={() => setup.mutate()}>
-          {m.messages_encryption_enable()}
-        </Button>
-      )}
+      {access.isSuccess && !access.data.recovery && <p>{m.messages_encryption_unavailable()}</p>}
       {access.data?.recovery && existing && !request.data && (
         <Button disabled={busy} onClick={() => request.mutate()}>
           {m.messages_encryption_recover()}

@@ -406,7 +406,7 @@ build cache key. The branding build shares this plugin.
 
 ## Recoverable messages
 
-`src/atoms/message-access.ts` and `src/components/message-access.tsx` gate messaging on a local account identity. `src/lib/message-key-store.ts` retains non-extractable keys in IndexedDB; signing out clears plaintext caches but retains trusted-browser keys. Threads decrypt locally through `@my-tuums/message-crypto`; inbox previews stay generic. See [email recovery and privacy limits](../../docs/message-encryption.md).
+`src/atoms/message-access.ts` initializes missing identities automatically from the root layout once the protected product is ready. Its account-scoped query serializes initialization across browser tabs and preserves the server identity when devices race. `src/components/message-access.tsx` gates messaging on local keys, offering email recovery for existing identities and retry for setup failures; there is no activation button. `src/lib/message-key-store.ts` retains non-extractable keys in IndexedDB; signing out clears plaintext caches but retains trusted-browser keys. Threads decrypt locally through `@my-tuums/message-crypto`; inbox previews stay generic. See [email recovery and privacy limits](../../docs/message-encryption.md).
 
 ## Message attachments
 
