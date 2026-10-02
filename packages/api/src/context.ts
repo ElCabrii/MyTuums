@@ -38,6 +38,8 @@ export interface ApiServices {
   messageNotifier: MessageNotifier | null;
   /** Absent environments cannot enrol or recover encryption keys. Never falls back to plaintext. */
   messageRecoveryKeys?: MessageRecoveryKeys;
+  /** Public VAPID key; absent environments cannot subscribe browsers. */
+  webPushPublicKey?: string;
   webOrigin: string;
   appealToken: AppealTokenSigner;
 }

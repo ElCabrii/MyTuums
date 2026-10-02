@@ -1,3 +1,5 @@
+import en from "./messages/en.json" with { type: "json" };
+import fr from "./messages/fr.json" with { type: "json" };
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { Plugin } from "vite";
@@ -116,6 +118,29 @@ export function serviceWorkerSource(
 const RUNTIME_CACHE_NAME = ${JSON.stringify(runtimeCacheName)};
 const APP_SHELL = ${JSON.stringify(resources)};
 const SHELL_PATHS = new Set(APP_SHELL);
+
+self.addEventListener("push", (event) => {
+  event.waitUntil(self.registration.showNotification("MyTuums", {
+    body: self.navigator.language.startsWith("fr") ? ${JSON.stringify(fr.push_notification_body)} : ${JSON.stringify(en.push_notification_body)},
+    icon: "/mytuums-192.png",
+    badge: "/mytuums-monochrome-192.png",
+    tag: "mytuums-inbox",
+  }));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const inbox = windows.find((client) => new URL(client.url).origin === self.location.origin && new URL(client.url).pathname === "/notifications");
+    if (inbox) return inbox.focus();
+    return self.clients.openWindow("/notifications");
+  })());
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "ACTIVATE_BROWSER_PUSH") event.waitUntil(self.skipWaiting());
+});
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));

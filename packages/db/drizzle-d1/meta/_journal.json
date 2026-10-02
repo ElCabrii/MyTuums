@@ -92,6 +92,20 @@
       "when": 1790113998369,
       "tag": "0012_encrypted_message_writes",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1790596055290,
+      "tag": "0013_browser_push",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1790596180793,
+      "tag": "0014_push_delivery_trigger",
+      "breakpoints": true
     }
   ]
 }

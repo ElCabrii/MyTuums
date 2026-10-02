@@ -231,3 +231,10 @@ for messaging setup and email recovery. Each environment needs its own keyring
 and secure backup. Read [generation, rotation and rollout instructions](message-encryption.md#deployment-and-recovery-key-custody)
 before deployment. Migrations 0008/0009 preserve legacy messages but permanently
 refuse new plaintext writes; an older Worker cannot restore plaintext sending.
+
+## Browser push delivery
+
+Browser notifications use the existing minute maintenance Workflow and session-bound
+D1 subscriptions. Configure the environment's VAPID secrets before enabling the
+feature; see [browser notification operations](browser-notifications.md#configuration-and-rollout)
+for generation, rollout order, retries and hosted-device verification.

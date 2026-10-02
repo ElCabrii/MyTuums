@@ -813,3 +813,12 @@ kept. _Avoid:_ alert, ping, message (a separate private-conversation term).
 
 - [architecture.md](architecture.md) — how each of these is implemented.
 - [security.md](security.md) — what is public, what is gated, and why.
+
+### Browser notifications
+
+The Notifications page includes a per-browser opt-in for background alerts about
+new inbox activity. Alerts use generic text and open the inbox; signing out revokes
+delivery for that login. Permission and unsupported-browser guidance are localized
+in English and French. Private messages and per-type preferences are outside this
+release. See [browser notifications](browser-notifications.md) for browser requirements
+and delivery limits.
