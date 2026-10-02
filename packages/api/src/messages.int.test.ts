@@ -523,10 +523,14 @@ describe("unread state and markRead", () => {
       send(contextFor(sender), recipient.id, "4"),
     ]);
 
-    const times = [first, ...burst].map((row) => row.createdAt.getTime());
-    for (let i = 1; i < times.length; i++) {
-      expect(times[i]).toBeGreaterThan(times[i - 1]);
+    // Concurrent sends can commit out of Promise.all input order (PR #425).
+    const times = burst.map((row) => row.createdAt.getTime());
+    expect(new Set(times).size).toBe(burst.length);
+    for (const time of times) {
+      expect(time).toBeGreaterThan(first.createdAt.getTime());
     }
+    const next = await send(contextFor(sender), recipient.id, "5");
+    expect(next.createdAt.getTime()).toBeGreaterThan(Math.max(...times));
   });
 
   it("publishes a self-only read event for the acting user's other tabs", async () => {
