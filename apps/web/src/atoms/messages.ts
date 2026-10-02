@@ -125,6 +125,12 @@ export type ThreadItem = MessageItem & { pending?: boolean; pendingMedia?: Pendi
 type ThreadCache = { pages: Array<{ items: ThreadItem[]; nextCursor: string | null }> };
 type ThreadSnapshot = Array<[readonly unknown[], ThreadCache | undefined]>;
 
+/** Pending callbacks can outlive logout, so ownership belongs to each invocation. */
+interface MessageMutationContext {
+  viewerId: string | undefined;
+  snapshot?: ThreadSnapshot;
+}
+
 /**
  * One draft per RECIPIENT, in memory: it survives the new-message → thread
  * transition (both composers key the same recipient id) instead of being
@@ -372,7 +378,7 @@ export const deleteMessageAtom = atomWithMutation<
   { id: string; conversationId: string; deletedAt: Date | null },
   DeleteMessageVariables,
   Error,
-  { snapshot: ThreadSnapshot }
+  MessageMutationContext
 >((get) => {
   const queryClient = get(queryClientAtom);
 
@@ -403,12 +409,14 @@ export const deleteMessageAtom = atomWithMutation<
             }
           : data,
       );
-      return { snapshot };
+      return { snapshot, viewerId: get(viewerIdAtom) };
     },
     onError: (_error, _variables, context) => {
-      restoreSnapshot(queryClient, context?.snapshot);
+      if (context?.viewerId && get(viewerIdAtom) === context.viewerId)
+        restoreSnapshot(queryClient, context.snapshot);
     },
-    onSuccess: () => {
+    onSuccess: (_message, _variables, context) => {
+      if (!context?.viewerId || get(viewerIdAtom) !== context.viewerId) return;
       void queryClient.invalidateQueries({ queryKey: orpc.message.conversations.key() });
       void queryClient.invalidateQueries({ queryKey: messagesUnreadQueryOptions().queryKey });
     },
@@ -429,13 +437,16 @@ interface MarkReadVariables {
 export const markThreadReadAtom = atomWithMutation<
   { lastReadAt: Date | null; advanced: boolean },
   MarkReadVariables,
-  Error
+  Error,
+  MessageMutationContext
 >((get) => {
   const queryClient = get(queryClientAtom);
 
   return {
     ...orpc.message.markRead.mutationOptions(),
-    onSuccess: (result, variables) => {
+    onMutate: () => ({ viewerId: get(viewerIdAtom) }),
+    onSuccess: (result, variables, context) => {
+      if (!context?.viewerId || get(viewerIdAtom) !== context.viewerId) return;
       queryClient.setQueriesData<InboxCache>(
         { queryKey: orpc.message.conversations.key() },
         (data) =>
@@ -485,17 +496,22 @@ export const acceptRequestAtom = atomWithMutation<
   { conversationId: string },
   { conversationId: string },
   Error,
-  { snapshot: ThreadSnapshot }
+  MessageMutationContext
 >((get) => {
   const queryClient = get(queryClientAtom);
 
   return {
     ...orpc.message.accept.mutationOptions(),
-    onMutate: ({ conversationId }) => ({ snapshot: removeRequestRow(queryClient, conversationId) }),
+    onMutate: ({ conversationId }) => ({
+      snapshot: removeRequestRow(queryClient, conversationId),
+      viewerId: get(viewerIdAtom),
+    }),
     onError: (_error, _variables, context) => {
-      restoreSnapshot(queryClient, context?.snapshot);
+      if (context?.viewerId && get(viewerIdAtom) === context.viewerId)
+        restoreSnapshot(queryClient, context.snapshot);
     },
-    onSuccess: () => {
+    onSuccess: (_request, _variables, context) => {
+      if (!context?.viewerId || get(viewerIdAtom) !== context.viewerId) return;
       void queryClient.invalidateQueries({ queryKey: orpc.message.conversations.key() });
       void queryClient.invalidateQueries({ queryKey: messagesUnreadQueryOptions().queryKey });
     },
@@ -510,17 +526,22 @@ export const declineRequestAtom = atomWithMutation<
   { conversationId: string },
   { conversationId: string },
   Error,
-  { snapshot: ThreadSnapshot }
+  MessageMutationContext
 >((get) => {
   const queryClient = get(queryClientAtom);
 
   return {
     ...orpc.message.decline.mutationOptions(),
-    onMutate: ({ conversationId }) => ({ snapshot: removeRequestRow(queryClient, conversationId) }),
+    onMutate: ({ conversationId }) => ({
+      snapshot: removeRequestRow(queryClient, conversationId),
+      viewerId: get(viewerIdAtom),
+    }),
     onError: (_error, _variables, context) => {
-      restoreSnapshot(queryClient, context?.snapshot);
+      if (context?.viewerId && get(viewerIdAtom) === context.viewerId)
+        restoreSnapshot(queryClient, context.snapshot);
     },
-    onSuccess: () => {
+    onSuccess: (_request, _variables, context) => {
+      if (!context?.viewerId || get(viewerIdAtom) !== context.viewerId) return;
       void queryClient.invalidateQueries({ queryKey: messagesUnreadQueryOptions().queryKey });
     },
   };
@@ -530,13 +551,16 @@ export const declineRequestAtom = atomWithMutation<
 export const hideConversationAtom = atomWithMutation<
   { conversationId: string },
   { conversationId: string },
-  Error
+  Error,
+  MessageMutationContext
 >((get) => {
   const queryClient = get(queryClientAtom);
 
   return {
     ...orpc.message.hide.mutationOptions(),
-    onSuccess: (_result, variables) => {
+    onMutate: () => ({ viewerId: get(viewerIdAtom) }),
+    onSuccess: (_result, variables, context) => {
+      if (!context?.viewerId || get(viewerIdAtom) !== context.viewerId) return;
       queryClient.setQueriesData<InboxCache>(
         { queryKey: orpc.message.conversations.key() },
         (data) =>

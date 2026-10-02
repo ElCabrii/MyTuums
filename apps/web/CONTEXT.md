@@ -136,6 +136,12 @@ app's build from the same origin.
   best-effort sweep so chunk loading cannot block sign-out.
   Notifications, the moderation queue and the audit log use single query
   atoms: their data is cleared by the QueryClient, with no family to sweep.
+- **Message mutation callbacks belong to their initiating viewer.** QueryClient
+  teardown cannot cancel an already-issued mutation. Each delete, request,
+  read and hide mutation records its viewer in the invocation context; late
+  rollback and success callbacks must not restore private snapshots or patch
+  another viewer's inbox after logout (issue #408). Sends apply the same
+  viewer check before reconciling plaintext.
 - **Like and follow serialise per entity.** One `scope` id per entity,
   per-entity intent atoms drop superseded responses, and rollback rides on
   mutation-level `onError` — per-call callbacks never fire for write-only

@@ -229,7 +229,7 @@ those systems before allowing writes to a restored database.
 `MESSAGE_RECOVERY_KEYRING` is a separate application Worker secret, required
 for messaging setup and email recovery. Each environment needs its own keyring
 and secure backup. Read [generation, rotation and rollout instructions](message-encryption.md#deployment-and-recovery-key-custody)
-before deployment. Migrations 0008/0009 preserve legacy messages but permanently
+before deployment. Migrations 0011/0012 preserve legacy messages but permanently
 refuse new plaintext writes; an older Worker cannot restore plaintext sending.
 
 ## Browser push delivery

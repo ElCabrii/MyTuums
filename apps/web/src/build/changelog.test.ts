@@ -1,5 +1,6 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import webPackage from "../../package.json" with { type: "json" };
 import { loadBuiltChangelog, renderChangelogMarkdown } from "@/build/changelog";
 
 describe("renderChangelogMarkdown", () => {
@@ -39,10 +40,10 @@ describe("loadBuiltChangelog", () => {
   const changelogDirectory = path.resolve(import.meta.dirname, "../../changelog");
 
   it("loads both localized notes for the release", () => {
-    const changelog = loadBuiltChangelog(changelogDirectory, "0.5.0");
+    const changelog = loadBuiltChangelog(changelogDirectory, webPackage.version);
 
-    expect(changelog.en).toContain("Welcome to Beta!");
-    expect(changelog.fr).toContain("Bienvenue dans la bêta !");
+    expect(changelog.en).toContain(`MyTuums ${webPackage.version}`);
+    expect(changelog.fr).toContain(`MyTuums ${webPackage.version}`);
   });
 
   it("returns no content when the running version has no release notes", () => {
