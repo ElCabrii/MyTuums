@@ -151,6 +151,10 @@ app's build from the same origin.
   because a repost is a feed _event_ whose position is server-ordered — a new
   one lands at the top of the home feeds, and an unrepost removes one from
   them.
+- **A confirmed bookmark refreshes the saved list.** Cancel any older bookmarks
+  read before invalidating that feed, including an unfinished first load:
+  navigation can reach the saved page while the write is still pending.
+  Confirmed unbookmarks remove the row from cached saved pages directly.
 - **Marking notifications read cancels older list and badge requests before
   patching their caches.** An unfinished initial list restarts after marking
   read; loaded lists keep their pages without a redundant refetch. Otherwise
