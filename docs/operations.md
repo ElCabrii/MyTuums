@@ -111,7 +111,7 @@ Cloudflare consent-purpose gate; the app's six-month consent decision is the
 single gate. The app strips query strings before it emits the event, and its
 consent controller is the only code allowed to emit `MyTuumsPageview`.
 
-Runtime secrets include authentication, OAuth, Stream, IGDB, message-recovery and appeal-signing
+Runtime secrets include authentication, OAuth, Stream, IGDB and appeal-signing
 credentials. The app and jobs Workers share the same independently generated
 `APPEAL_TOKEN_SECRET`; `BETTER_AUTH_SECRET` stays app-only. Changing a runtime
 secret cannot alter values already baked into the browser bundle.
@@ -224,17 +224,19 @@ contain sessions and verification capabilities. D1 recovery does not restore
 R2 objects, Stream videos, Workflow history or Durable Object state; coordinate
 those systems before allowing writes to a restored database.
 
-## Message recovery custody
-
-`MESSAGE_RECOVERY_KEYRING` is a separate application Worker secret, required
-for messaging setup and email recovery. Each environment needs its own keyring
-and secure backup. Read [generation, rotation and rollout instructions](message-encryption.md#deployment-and-recovery-key-custody)
-before deployment. Migrations 0011/0012 preserve legacy messages but permanently
-refuse new plaintext writes; an older Worker cannot restore plaintext sending.
-
 ## Browser push delivery
 
 Browser notifications use the existing minute maintenance Workflow and session-bound
 D1 subscriptions. Configure the environment's VAPID secrets before enabling the
 feature; see [browser notification operations](browser-notifications.md#configuration-and-rollout)
 for generation, rollout order, retries and hosted-device verification.
+
+## Messaging rollback before 0.6.0
+
+Apply migrations 0015/0016 through the normal pre-deploy workflow. They discard
+unreleased encrypted test messages and keys, preserve plaintext history, and
+queue attachment cleanup through the existing triggers. The matching Worker
+and SPA send and read plain message text over HTTPS. The earlier encryption
+Worker cannot run against this schema; roll forward with the matching build.
+`MESSAGE_RECOVERY_KEYRING` is unused and can be removed from hosted environments
+after deployment. No messaging secret is needed for new environments.

@@ -1,4 +1,3 @@
-import { localMessageRecoveryKeys } from "./local-message-recovery.js";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { createAuth, type OutgoingEmail } from "@my-tuums/auth";
 import { createDatabase } from "@my-tuums/db";
@@ -61,7 +60,6 @@ async function application(env: DevelopmentEnv) {
       rateLimiter: createDistributedRateLimiter(env.API_COUNTERS),
       emailSender: { send: sendEmail },
       messageNotifier: createMessageNotifier(env.MESSAGE_HUB),
-      messageRecoveryKeys: localMessageRecoveryKeys(),
       appealToken: createAppealTokenSigner(secret),
       linkTransport: createWorkerLinkTransport(env.LINK_FETCHER),
     },

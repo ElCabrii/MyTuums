@@ -77,16 +77,7 @@ function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
             flagging before picking a reason. A user target has no post. */}
         {target.targetType === "post" && <ReportPreview post={target.post} />}
         {target.targetType === "message" && (
-          <>
-            <MessageReportPreview body={target.body} attachments={target.attachments ?? []} />
-            {(target.disclosure || (target.body === null && !!target.attachments?.length)) && (
-              <p className="text-muted-foreground text-sm">
-                {target.disclosure
-                  ? m.messages_report_disclosure()
-                  : m.messages_report_attachments_only()}
-              </p>
-            )}
-          </>
+          <MessageReportPreview body={target.body} attachments={target.attachments ?? []} />
         )}
         {/* `items` is what makes the trigger read "Hate speech" once a reason
             is picked: Base UI renders the raw code otherwise. */}
@@ -136,7 +127,6 @@ function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
                   // the schema's own union, not a coercion.
                   report.mutate({
                     targetType: target.targetType,
-                    disclosure: target.targetType === "message" ? target.disclosure : undefined,
                     targetId: target.targetId,
                     reason: trimmed as (typeof POST_REPORT_REASONS)[number],
                   });

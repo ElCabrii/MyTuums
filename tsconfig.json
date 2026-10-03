@@ -10,7 +10,6 @@
     "eslint.config.ts",
     "oxlint.config.ts",
     "scripts/check-docs.ts",
-    "scripts/create-message-recovery-key.ts",
     "scripts/create-push-keys.ts"
   ]
 }

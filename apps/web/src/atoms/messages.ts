@@ -1,6 +1,3 @@
-import { decryptMessage, encryptMessage, envelopeSchema } from "@my-tuums/message-crypto";
-import { messageAccessAtom } from "@/atoms/message-access";
-import { m } from "@/paraglide/messages.js";
 import type { QueryClient } from "@tanstack/react-query";
 import { atomFamily } from "jotai-family";
 import {
@@ -9,7 +6,7 @@ import {
   atomWithQuery,
   queryClientAtom,
 } from "jotai-tanstack-query";
-import { client, orpc } from "@/lib/orpc";
+import { orpc } from "@/lib/orpc";
 import type { ConversationItem, MessageItem, MessageRequestItem, SentMessage } from "@/lib/orpc";
 import { protectedProductReadyAtom } from "@/atoms/query-readiness";
 import { viewerIdAtom } from "@/atoms/session";
@@ -57,45 +54,10 @@ export const messagesUnreadAtom = atomWithQuery((get) => ({
  * `atoms/session-teardown.ts`).
  */
 export const messageThreadFamily = atomFamily((conversationId: string) =>
-  atomWithInfiniteQuery((get) => {
-    const local = get(messageAccessAtom).data?.local;
-    return {
-      ...messageThreadQueryOptions(conversationId),
-      enabled: get(protectedProductReadyAtom) && !!local,
-      queryFn: async ({ pageParam }: { pageParam: string | undefined }) => {
-        if (!local) throw new Error("Message keys are locked.");
-        const page = await client.message.thread({
-          conversationId,
-          cursor: pageParam,
-        });
-        const other = await client.messageKey.identity({ userId: page.user.id });
-        const items: Array<MessageItem & { envelope: string | null }> = await Promise.all(
-          page.items.map(async (item) => {
-            if (!item.envelope || item.deletedAt) return item;
-            const sender = item.senderId === local.public.userId ? local.public : other;
-            try {
-              if (!sender) throw new Error("Sender identity is unavailable.");
-              const decrypted = await decryptMessage(
-                envelopeSchema.parse(JSON.parse(item.envelope)),
-                local,
-                sender,
-                {
-                  id: item.id,
-                  senderId: item.senderId,
-                  recipientId:
-                    item.senderId === local.public.userId ? page.user.id : local.public.userId,
-                },
-              );
-              return { ...item, body: decrypted.message.body, disclosure: decrypted.disclosure };
-            } catch {
-              return { ...item, body: null, decryptionFailed: true };
-            }
-          }),
-        );
-        return { ...page, items };
-      },
-    };
-  }),
+  atomWithInfiniteQuery((get) => ({
+    ...messageThreadQueryOptions(conversationId),
+    enabled: get(protectedProductReadyAtom),
+  })),
 );
 
 /** Drops every thread this family created — called from `clearViewerState`. */
@@ -176,7 +138,7 @@ export function seedFirstMessageThread(
         lastReadAt: null,
         hidden: false,
         user,
-        items: [{ ...message, envelope: message.envelope ?? null, deletedAt: null }],
+        items: [{ ...message, deletedAt: null }],
         nextCursor: null,
       },
     ],
@@ -204,8 +166,9 @@ interface SendVariables {
   /** The open thread the composer sits in, when there is one. */
   conversationId?: string;
   /**
-   * Media stays on the existing upload path; the mutation encrypts the body
-   * and sends only the envelope beside these attachments.
+   * The wire shape of `message.send` (one media GROUP per message) plus the
+   * routing-only `conversationId`, which the server's zod strips. Keeping
+   * variables wire-shaped means the mutation options need no override.
    */
   images?: File[];
   voice?: File;
@@ -256,46 +219,15 @@ export const sendMessageAtom = atomWithMutation<
   SentMessage,
   SendVariables,
   Error,
-  { snapshot: ThreadSnapshot | undefined }
+  MessageMutationContext
 >((get) => {
   const queryClient = get(queryClientAtom);
-  const viewerId = get(viewerIdAtom);
 
   return {
-    mutationFn: async ({
-      recipientId,
-      body,
-      images,
-      voice,
-      voiceDurationMs,
-      videoId,
-    }: SendVariables): Promise<SentMessage> => {
-      const local = get(messageAccessAtom).data?.local;
-      if (!local || local.public.userId !== get(viewerIdAtom))
-        throw new Error(m.messages_encryption_error());
-      const recipient = await client.messageKey.identity({ userId: recipientId });
-      if (!recipient) throw new Error(m.messages_recipient_not_ready());
-      const id = crypto.randomUUID();
-      const envelope = await encryptMessage(
-        { version: 1, id, senderId: local.public.userId, recipientId, body },
-        local,
-        recipient,
-      );
-      if (local.public.userId !== get(viewerIdAtom)) throw new Error(m.messages_encryption_error());
-      const sent = await client.message.send({
-        id,
-        recipientId,
-        envelope,
-        images,
-        voice,
-        voiceDurationMs,
-        videoId,
-      });
-      if (local.public.userId !== get(viewerIdAtom)) throw new Error(m.messages_encryption_error());
-      return { ...sent, body };
-    },
+    ...orpc.message.send.mutationOptions(),
     onMutate: ({ conversationId, body, ...media }) => {
-      if (!conversationId || !viewerId) return { snapshot: undefined };
+      const viewerId = get(viewerIdAtom);
+      if (!conversationId || !viewerId) return { viewerId };
       const key = threadKeyOf(conversationId);
       void queryClient.cancelQueries({ queryKey: key });
       const snapshot = snapshotOf(queryClient, key);
@@ -329,14 +261,14 @@ export const sendMessageAtom = atomWithMutation<
             }
           : data,
       );
-      return { snapshot };
+      return { snapshot, viewerId };
     },
     onError: (_error, _variables, context) => {
-      if (viewerId && get(viewerIdAtom) === viewerId)
-        restoreSnapshot(queryClient, context?.snapshot);
+      if (context?.viewerId && get(viewerIdAtom) === context.viewerId)
+        restoreSnapshot(queryClient, context.snapshot);
     },
-    onSuccess: (message) => {
-      if (!viewerId || get(viewerIdAtom) !== viewerId) return;
+    onSuccess: (message, _variables, context) => {
+      if (!context?.viewerId || get(viewerIdAtom) !== context.viewerId) return;
       const key = threadKeyOf(message.conversationId);
       queryClient.setQueriesData<ThreadCache>({ queryKey: key }, (data) =>
         data

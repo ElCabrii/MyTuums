@@ -2,7 +2,6 @@ import type { Auth, OutgoingEmail } from "@my-tuums/auth";
 import type { Database } from "@my-tuums/db";
 import type { LinkFetchTransport } from "./link-card-http.js";
 import type { MessageNotifier } from "./message-events.js";
-import type { MessageRecoveryKeys } from "./message-recovery-keys.js";
 import type { RateLimiter } from "./rate-limit.js";
 import type { ObjectStorage } from "./object-storage.js";
 import type { JobDispatcher } from "./jobs.js";
@@ -36,8 +35,6 @@ export interface ApiServices {
   emailSender: EmailSender;
   /** Null where no MessageHub binding exists (jobs, tests without one). */
   messageNotifier: MessageNotifier | null;
-  /** Absent environments cannot enrol or recover encryption keys. Never falls back to plaintext. */
-  messageRecoveryKeys?: MessageRecoveryKeys;
   /** Public VAPID key; absent environments cannot subscribe browsers. */
   webPushPublicKey?: string;
   webOrigin: string;

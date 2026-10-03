@@ -243,10 +243,6 @@ The command name remains compatible with the completed preview migration.
 See [production execution](../../docs/cloudflare-production-migration.md) for
 resource identities, backups and cutover gates.
 
-## Recoverable messages
-
-Messaging migration 0011 adds encrypted envelopes, immutable account identity backups and session/email-bound recovery challenges. Custom migration 0012 forbids new plaintext inserts and body/envelope updates, preserving legacy reads and tombstones. Do not drop these triggers during table rebuilds or server rollback. See [encryption storage and rollout](../../docs/message-encryption.md).
-
 ## Message media migrations
 
 `0008_message_media.sql` adds `message_attachment` and permits empty message
@@ -258,3 +254,13 @@ attachment deletion, including account cascades. Message tombstones retain
 attachments for reports. The Stream cleanup trigger distinguishes a lost post
 reference from a published message video, which legitimately has no post ID.
 Preserve these custom triggers when rebuilding attachment or video tables.
+
+## Message encryption rollback
+
+Migrations 0015/0016 retire the unreleased encryption feature without rewriting
+the migration history. Encrypted preview/test messages are deleted through the
+existing attachment cleanup triggers; plaintext messages, report evidence and
+participant state for retained conversations survive. Encryption-only threads
+are removed and mixed threads regain their last plaintext message timestamp.
+The key/recovery tables and envelope column are dropped; message bodies remain
+immutable. Apply these migrations before deploying the matching Worker/SPA.

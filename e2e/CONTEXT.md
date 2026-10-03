@@ -113,7 +113,3 @@ The build generates frontend route and locale artifacts.
 
 Generated `.auth`, `test-results`, `playwright-report` and `.wrangler` data are
 ignored. Never commit captured messages, cookies, keys or local database files.
-
-## Recoverable messages
-
-`tests/specs/messages.spec.ts` covers automatic key setup from Home across simultaneous tabs, encrypted cross-session delivery and recovery after local keys are removed. The multi-session journey uses dedicated accounts so earlier signed-in page visits cannot consume its recovery allowance; copied browser state explicitly excludes IndexedDB keys. Recovery codes come only from captured local R2 mail, after the helper checks that the request succeeded. The public synthetic recovery key is confined to development/e2e composition.
