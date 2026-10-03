@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
 import { videoDraftAtomFamily } from "@/atoms/video-upload";
 import { useState, type ReactElement } from "react";
@@ -27,6 +28,7 @@ import { installTestOrpc, orpc } from "@/lib/orpc";
 import type { MessageItem } from "@/lib/orpc";
 import { messageThreadQueryOptions } from "@/lib/query-definitions";
 import { clearMessageDrafts } from "@/atoms/messages";
+import { reportDialogAtom } from "@/atoms/dialog-targets";
 import { MessageThreadPane, NewMessagePane } from "@/components/message-thread";
 import { renderWithProviders } from "@/test/render";
 import { createTestQueryClient } from "@/test/factories";
@@ -181,7 +183,8 @@ it("a hidden thread renders its history with the hidden notice above it", async 
   ).toBeVisible();
 });
 
-it("the header kebab carries report-user and hide-conversation, hide only for an open thread", async () => {
+it("the thread header menu offers hide and reports the other user", async () => {
+  const user = userEvent.setup();
   const { queryClient, render } = makePane(<MessageThreadPane conversationId="c-1" />);
   const now = new Date();
   seedThread(queryClient, "c-1", [], now);
@@ -199,13 +202,15 @@ it("the header kebab carries report-user and hide-conversation, hide only for an
     expect(screen.getByRole("textbox", { name: "Write a message" })).toBeVisible(),
   );
 
-  // Both actions live behind the one kebab — neither is a bare icon anymore.
-  fireEvent.click(
-    // ByRole names match the full accessible name already — no exact flag.
-    screen.getByRole("button", { name: "More" }),
-  );
-  await waitFor(() => expect(screen.getByRole("menuitem", { name: "Report user" })).toBeVisible());
+  // A lone synchronous click intermittently missed opening the Base UI menu in CI.
+  // Exercise the pointer/focus sequence a user generates before checking its actions.
+  await user.click(screen.getByRole("button", { name: "More" }));
+  const report = await screen.findByRole("menuitem", { name: "Report user" });
+  expect(report).toBeVisible();
   expect(screen.getByRole("menuitem", { name: "Hide conversation" })).toBeVisible();
+
+  await user.click(report);
+  expect(screen.store.get(reportDialogAtom)).toEqual({ targetType: "user", targetId: OTHER });
 });
 
 it("switching conversations starts from an empty composer — a draft never crosses recipients", async () => {
