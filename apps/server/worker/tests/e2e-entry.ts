@@ -1,4 +1,3 @@
-import { localMessageRecoveryKeys } from "../local-message-recovery.js";
 import { createAuth, type OutgoingEmail } from "@my-tuums/auth";
 import { createDatabase } from "@my-tuums/db";
 import {
@@ -75,7 +74,6 @@ async function application(env: Env) {
       appealToken: createAppealTokenSigner(E2E_AUTH_SECRET),
       emailSender: { send: sendEmail },
       messageNotifier: createMessageNotifier(env.MESSAGE_HUB),
-      messageRecoveryKeys: localMessageRecoveryKeys(),
       videoJobs: videoJobs,
       videoUploads: createVideoUploads(db, stream, videoJobs),
       linkTransport: {

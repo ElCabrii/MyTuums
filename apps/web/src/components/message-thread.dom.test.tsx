@@ -1,18 +1,10 @@
-import {
-  createIdentity,
-  publicIdentity,
-  unlockIdentity,
-  type LocalIdentity,
-} from "@my-tuums/message-crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { createStore } from "jotai";
-import { reportDialogAtom } from "@/atoms/dialog-targets";
 import { videoDraftAtomFamily } from "@/atoms/video-upload";
 import { useState, type ReactElement } from "react";
 
 const fakeClient = {
-  messageKey: { identity: vi.fn(), status: vi.fn() },
   message: {
     send: vi.fn(),
     conversations: vi.fn(),
@@ -28,9 +20,10 @@ const fakeClient = {
   },
 };
 
-installTestClient(fakeClient);
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
-import { installTestClient, orpc } from "@/lib/orpc";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc, orpc } from "@/lib/orpc";
 import type { MessageItem } from "@/lib/orpc";
 import { messageThreadQueryOptions } from "@/lib/query-definitions";
 import { clearMessageDrafts } from "@/atoms/messages";
@@ -56,7 +49,6 @@ type ThreadSeed = {
 
 const VIEWER = "viewer-1";
 const OTHER = "user-2";
-let local: LocalIdentity;
 
 function pageMessage(overrides: Partial<MessageItem> = {}): MessageItem {
   return {
@@ -114,20 +106,11 @@ function ConversationSwitcher() {
 
 function makePane(element: ReactElement) {
   const queryClient = createTestQueryClient();
-  queryClient.setQueryData(["message-access", VIEWER], {
-    local,
-    identity: local.public,
-    recovery: null,
-  });
   const render = () => renderWithProviders(element, { signedInAs: { id: VIEWER }, queryClient });
   return { queryClient, render };
 }
 
-beforeEach(async () => {
-  local = await unlockIdentity(await createIdentity(VIEWER));
-  const recipient = await createIdentity(OTHER);
-  fakeClient.messageKey.identity.mockResolvedValue(publicIdentity(recipient));
-  fakeClient.messageKey.status.mockResolvedValue({ identity: local.public, recovery: null });
+beforeEach(() => {
   fakeClient.message.markRead.mockReset();
   fakeClient.message.markRead.mockResolvedValue({ lastReadAt: new Date(), advanced: true });
   fakeClient.message.thread.mockReset();
@@ -316,14 +299,7 @@ it("first contact seeds the thread and the draft typed during the move survives 
 
   fireEvent.change(composer(), { target: { value: "first contact" } });
   fireEvent.click(screen.getByRole("button", { name: "Send" }));
-  await waitFor(() => {
-    const failure = queryClient
-      .getMutationCache()
-      .getAll()
-      .find((mutation) => mutation.state.error)?.state.error;
-    if (failure) throw failure;
-    expect(fakeClient.message.send).toHaveBeenCalled();
-  });
+  await waitFor(() => expect(fakeClient.message.send).toHaveBeenCalled());
 
   // The sent message is in the destination thread's cache under the exact
   // key its query mounts with.
@@ -608,11 +584,6 @@ it("keeps the caption unsendable until the selected video upload finishes", asyn
   vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
   const conversationId = "uploading-video";
   const queryClient = createTestQueryClient();
-  queryClient.setQueryData(["message-access", VIEWER], {
-    local,
-    identity: local.public,
-    recovery: null,
-  });
   const store = createStore();
   const draftAtom = videoDraftAtomFamily(`message:${OTHER}`);
   const draft = {
@@ -642,50 +613,4 @@ it("keeps the caption unsendable until the selected video upload finishes", asyn
   expect(screen.getByRole("button", { name: m.messages_send() })).toBeDisabled();
   act(() => store.set(draftAtom, { ...draft, status: "uploaded" }));
   expect(screen.getByRole("button", { name: m.messages_send() })).toBeEnabled();
-});
-
-it("keeps unreadable encrypted media reportable without offering unreadable text as evidence", async () => {
-  const media = pageMessage({
-    body: null,
-    envelope: "{}",
-    decryptionFailed: true,
-    attachments: [
-      {
-        id: "report-image",
-        kind: "image",
-        url: "/media/messages/report/image.png",
-        contentType: "image/png",
-        byteSize: 100,
-        position: 0,
-        width: 2,
-        height: 2,
-        durationMs: null,
-        video: null,
-      },
-    ],
-  });
-  const textOnly = pageMessage({ body: null, envelope: "{}", decryptionFailed: true });
-  const { queryClient, render } = makePane(<MessageThreadPane conversationId="unreadable" />);
-  seedThread(queryClient, "unreadable", [media, textOnly], null);
-  fakeClient.message.thread.mockResolvedValue({
-    conversationId: "unreadable",
-    lastReadAt: null,
-    hidden: false,
-    user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
-    items: [media, textOnly],
-    nextCursor: null,
-  });
-  const { store } = await render();
-  const { screen } = await import("@testing-library/react");
-  const actions = await screen.findAllByRole("button", {
-    name: m.moderation_report_title_message(),
-  });
-  expect(actions).toHaveLength(1);
-  fireEvent.click(actions[0]);
-  expect(store.get(reportDialogAtom)).toMatchObject({
-    targetType: "message",
-    targetId: media.id,
-    body: null,
-    attachments: media.attachments,
-  });
 });

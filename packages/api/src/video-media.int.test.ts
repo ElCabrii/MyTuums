@@ -133,13 +133,7 @@ it("gates a message video on the conversation's participants and never serves it
       { conversationId, userId: sender.id, status: "active" },
       { conversationId, userId: recipient.id, status: "active" },
     ]),
-    db.insert(message).values({
-      id: messageId,
-      conversationId,
-      senderId: sender.id,
-      body: "[encrypted]",
-      envelope: "{}",
-    }),
+    db.insert(message).values({ id: messageId, conversationId, senderId: sender.id, body: "" }),
     db.insert(video).values({
       id: videoId,
       authorId: sender.id,

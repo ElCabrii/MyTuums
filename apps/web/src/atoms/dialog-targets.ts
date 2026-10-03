@@ -20,7 +20,6 @@ export type ReportDialogTarget =
       targetType: "message";
       targetId: string;
       body: string | null;
-      disclosure?: string;
       attachments?: MessageAttachment[];
     };
 

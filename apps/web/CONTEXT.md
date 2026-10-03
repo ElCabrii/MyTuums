@@ -151,6 +151,10 @@ app's build from the same origin.
   because a repost is a feed _event_ whose position is server-ordered — a new
   one lands at the top of the home feeds, and an unrepost removes one from
   them.
+- **A confirmed bookmark refreshes the saved list.** Cancel any older bookmarks
+  read before invalidating that feed, including an unfinished first load:
+  navigation can reach the saved page while the write is still pending.
+  Confirmed unbookmarks remove the row from cached saved pages directly.
 - **Marking notifications read cancels older list and badge requests before
   patching their caches.** An unfinished initial list restarts after marking
   read; loaded lists keep their pages without a redundant refetch. Otherwise
@@ -410,10 +414,6 @@ documents instead.
 The production origin is an explicit public build input and part of Turbo's
 build cache key. The branding build shares this plugin.
 
-## Recoverable messages
-
-`src/atoms/message-access.ts` initializes missing identities automatically from the root layout once the protected product is ready. Its account-scoped query serializes initialization across browser tabs and preserves the server identity when devices race. `src/components/message-access.tsx` gates messaging on local keys, offering email recovery for existing identities and retry for setup failures; there is no activation button. `src/lib/message-key-store.ts` retains non-extractable keys in IndexedDB; signing out clears plaintext caches but retains trusted-browser keys. Threads decrypt locally through `@my-tuums/message-crypto`; inbox previews stay generic. See [email recovery and privacy limits](../../docs/message-encryption.md).
-
 ## Message attachments
 
 The app shell and messages pane both use the dynamic viewport height. Mixing
@@ -438,3 +438,7 @@ videos use the existing player. `src/lib/message-preview.ts` supplies consistent
 media-only previews to the inbox and request list. The desktop messages pane
 uses the full viewport width. Verify with the message atom/thread DOM suites,
 voice-recorder tests, moderation case tests, and local browser inspection.
+
+Message history loads directly from the authenticated API on every browser;
+no local identity, initialization gate or email recovery is involved. Message
+text and media-only previews share the ordinary inbox/thread projections.
