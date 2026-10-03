@@ -1,7 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { stripTypeScriptTypes } from "node:module";
+import { fileURLToPath } from "node:url";
 import { Miniflare } from "miniflare";
+import { unstable_readConfig as readConfig } from "wrangler";
 import { afterAll, expect, it } from "vitest";
+import { z } from "zod";
 import type { MessagePushEvent } from "@my-tuums/api/message-events";
 
 // Execute the production class in workerd; only erase TypeScript, never
@@ -40,6 +43,61 @@ type HubBindings = {
 };
 const { HUBS } = await runtime.getBindings<HubBindings>("message-hub-test");
 afterAll(() => runtime.dispose());
+
+it.each(["preview", "production"])(
+  "opens a message stream through the %s deployment's configured binding",
+  async (environment) => {
+    const config = z
+      .object({
+        compatibility_date: z.string(),
+        durable_objects: z.object({
+          bindings: z.array(z.object({ name: z.string(), class_name: z.string() })),
+        }),
+      })
+      .parse(
+        readConfig({
+          config: fileURLToPath(new URL(`../wrangler.${environment}.jsonc`, import.meta.url)),
+        }),
+      );
+    const name = `message-hub-${environment}-test`;
+    const configuredRuntime = new Miniflare({
+      workers: [
+        {
+          config: {
+            type: "worker",
+            name,
+            compatibilityDate: config.compatibility_date,
+            manifest: {
+              mainModule: "index.js",
+              modules: { "index.js": { type: "esm", contents } },
+            },
+            exports: { MessageHub: { type: "durable-object", storage: "sqlite" } },
+            env: Object.fromEntries(
+              config.durable_objects.bindings
+                .filter((binding) => binding.class_name === "MessageHub")
+                .map((binding) => [
+                  binding.name,
+                  { type: "durable-object" as const, worker: name, exportName: binding.class_name },
+                ]),
+            ),
+          },
+        },
+      ],
+    });
+    try {
+      const bindings = await configuredRuntime.getBindings<{ MESSAGE_HUB: HubBindings["HUBS"] }>(
+        name,
+      );
+      const response =
+        await bindings.MESSAGE_HUB.getByName("release-check").fetch("https://hub/connect");
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("text/event-stream; charset=utf-8");
+      await response.body?.cancel();
+    } finally {
+      await configuredRuntime.dispose();
+    }
+  },
+);
 
 /** One live connection: consumes the initial retry frame, then reads events. */
 async function connect(name: string) {

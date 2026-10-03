@@ -61,6 +61,7 @@
         "name": "AUTH_COUNTERS",
         "class_name": "AuthRateLimitCounter",
       },
+      { "name": "MESSAGE_HUB", "class_name": "MessageHub" },
     ],
   },
   "migrations": [
