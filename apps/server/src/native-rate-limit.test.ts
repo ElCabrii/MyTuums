@@ -66,11 +66,12 @@ it("shares one budget across concurrent clients and keeps policy/caller budgets 
   });
 });
 
-it("allows a fresh window after expiry and alarm cleanup", async () => {
+it("allows a fresh window after expiry", async () => {
   const limiter = createDistributedRateLimiter(COUNTERS);
   const policy = { name: "expiry", limit: 1, windowMs: 100 };
   expect(await limiter.consume("expiring-user", policy)).toMatchObject({ allowed: true });
-  expect(await limiter.consume("expiring-user", policy)).toMatchObject({ allowed: false });
+  // Exhaustion is covered by the concurrent-budget test. An RPC round trip
+  // can outlast this short window, so only assert eventual renewed admission here.
   await expect
     .poll(async () => (await limiter.consume("expiring-user", policy)).allowed, {
       interval: 150,
