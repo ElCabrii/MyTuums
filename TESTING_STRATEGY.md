@@ -133,6 +133,12 @@ These tests use local runtime I/O and synthetic providers; they do not prove
 hosted Stream codec fidelity or Email Service delivery. They run through the
 existing `test:unit` orchestration despite being runtime integration checks.
 
+`pnpm test:unit` runs one workspace task at a time to limit contention between
+the native workerd/D1/R2 suites and the web suite. The R2 pagination test timed
+out when these tasks ran together in CI and locally. Workspace test-runner
+concurrency and timeouts remain unchanged; Turborepo limits only the tasks it
+launches together.
+
 ## When does a test deserve to exist?
 
 Write it if it protects at least one of these:
