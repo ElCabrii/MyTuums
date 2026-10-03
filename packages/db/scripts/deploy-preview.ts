@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { z } from "zod";
 import { unstable_readConfig } from "wrangler";
-import { requireDeploymentBranch, requirePreviewChecks } from "./preview-deploy-checks.js";
+import { requireDeploymentBranch, waitForPreviewChecks } from "./preview-deploy-checks.js";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const { values } = parseArgs({ options: { target: { type: "string", default: "preview" } } });
@@ -42,15 +42,17 @@ const githubHeaders = new Headers({
 });
 if (process.env.GITHUB_TOKEN)
   githubHeaders.set("Authorization", `Bearer ${process.env.GITHUB_TOKEN}`);
-const response = await fetch(
-  `https://api.github.com/repos/ElCabrii/MyTuums/commits/${commit}/check-runs?per_page=100`,
-  {
-    headers: githubHeaders,
-    signal: AbortSignal.timeout(15000),
-  },
-);
-if (!response.ok) throw new Error("Cannot verify the deployment commit's CI checks.");
-requirePreviewChecks(commit, await response.text());
+await waitForPreviewChecks(commit, async () => {
+  const response = await fetch(
+    `https://api.github.com/repos/ElCabrii/MyTuums/commits/${commit}/check-runs?per_page=100`,
+    {
+      headers: githubHeaders,
+      signal: AbortSignal.timeout(15000),
+    },
+  );
+  if (!response.ok) throw new Error("Cannot verify the deployment commit's CI checks.");
+  return response.text();
+});
 
 function run(args: string[]) {
   assertCheckout();

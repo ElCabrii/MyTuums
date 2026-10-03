@@ -183,7 +183,9 @@ jobs receive the Cloudflare token after those checks pass; verification jobs do
 not receive deployment credentials.
 
 Before a hosted release, the deploy command confirms all three required checks
-passed on the exact clean commit. Eligible pushes to `main` deploy production;
+passed on the exact clean commit. If newer checks for that commit are queued or
+running, it waits up to thirty minutes before any build, migration or deployment.
+Failed or cancelled checks still stop deployment. Eligible pushes to `main` deploy production;
 eligible pushes to `release/**` deploy preview. Other branches do not deploy.
 
 ## Maintenance
