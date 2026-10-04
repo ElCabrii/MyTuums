@@ -798,6 +798,15 @@ reposter_key)` — so it hand-rolls the same three parts the skeleton owns
   and validate. SQLite row-number partitions select each original's latest
   visible repost before applying the candidate budget. History/author ID sets
   bind through JSON to stay within D1 limits. No locks or cron are required.
+  The scoring budget is not a feed limit: after the frozen selection,
+  `rankContinuation` keyset-pages the remaining eligible events chronologically,
+  excluding snapshot IDs and events after its database `createdAt`. It picks
+  one latest event per original before applying the keyset. The existing
+  hydrator rechecks live eligibility and exact filters; the handler scans past
+  hidden slices and uses a visible lookahead. Continuation cursors keep the
+  snapshot binding, expiry and offset, adding an optional event-time/post-ID
+  key. `src/feed-continuation.int.test.ts` covers the age/pool cutoffs,
+  empty selections, repost deduplication, snapshot boundary and filters.
 - **`src/moderation-inputs.ts` is a leaf on purpose.** The moderation router
   files must never import each other — a cycle fails at module evaluation.
 

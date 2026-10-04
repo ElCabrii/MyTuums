@@ -21,6 +21,7 @@ export function PostFeed({
   emptyAction,
   emptyIcon = MessageSquare,
   showParentContext = false,
+  autoLoad = false,
 }: {
   /** The feed atom to read — parameterisation (scope, author) lives entirely in atom-land; see `atoms/post-feed.ts`. */
   feedAtom: ReturnType<typeof postFeedAtom>;
@@ -31,6 +32,7 @@ export function PostFeed({
   emptyIcon?: typeof MessageSquare;
   /** Render the immediate-parent preview used by profile activity cards. */
   showParentContext?: boolean;
+  autoLoad?: boolean;
 }) {
   const feed = useAtomValue(feedAtom);
   const posts = feed.data?.pages.flatMap((page) => page.items) ?? [];
@@ -46,6 +48,7 @@ export function PostFeed({
       emptyAction={emptyAction}
       listClassName="space-y-4"
       loadingFallback={<FeedSkeleton />}
+      autoLoad={autoLoad}
     >
       {posts.map((post, index) => (
         // The same post can be two legitimate timeline events — authored at

@@ -155,7 +155,8 @@ export const FEED_RANK_MAX_SNAPSHOTS_PER_VIEWER = 10;
  * The ranked candidate window (issue #305): candidates are top-level posts
  * from the last 7 days, widened to 30 days only when the 7-day pool is
  * sparse. Recency is a ranking signal, not just a filter — the window is
- * what keeps a ranked feed from surfacing archaeology.
+ * what keeps the initial recommendations recent. Older eligible posts stay
+ * reachable through the chronological continuation after that selection.
  */
 export const FEED_RANK_WINDOW_DAYS = 7;
 export const FEED_RANK_WINDOW_MAX_DAYS = 30;

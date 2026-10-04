@@ -32,11 +32,17 @@ import {
   GAME_SLUG_MAX_LENGTH,
   RANK_SNAPSHOT_INVALID_MESSAGE,
 } from "./constants.js";
-import { createCursorCodec, createEventCursorCodec, createRankCursorCodec } from "./cursor.js";
+import {
+  createCursorCodec,
+  createEventCursorCodec,
+  createRankCursorCodec,
+  type RankContinuationPosition,
+} from "./cursor.js";
 import {
   buildRankSnapshot,
   extractRankHashtagKeys,
   loadRankSnapshot,
+  rankContinuation,
   suggestRankAuthorIds,
   type LoadedRankSnapshot,
   type RankScope,
@@ -1966,6 +1972,7 @@ export const postRouter = {
 
         let snapshot: LoadedRankSnapshot;
         let offset = 0;
+        let after: RankContinuationPosition | undefined;
         if (input.cursor) {
           const decoded = postRankCursor.decode(input.cursor);
           if (input.snapshotId && input.snapshotId !== decoded.snapshotId) {
@@ -1981,6 +1988,7 @@ export const postRouter = {
             gameSlug,
           });
           offset = decoded.offset;
+          after = decoded.after;
         } else if (input.snapshotId) {
           // A refetch resuming the SAME snapshot from its first page.
           snapshot = await loadRankSnapshot(context.db, {
@@ -1994,6 +2002,7 @@ export const postRouter = {
           const built = await buildRankSnapshot(context.db, { viewerId, scope, q, gameSlug });
           snapshot = {
             id: built.id,
+            createdAt: built.createdAt,
             scope,
             q: q ?? null,
             gameSlug: gameSlug ?? null,
@@ -2026,10 +2035,48 @@ export const postRouter = {
               ? slice.findIndex((entry) => entry.postId === last.id) + 1
               : slice.length;
         }
-        const hasMore = offset < snapshot.items.length;
+        // Once the frozen ranking ends, fill the page (plus one lookahead)
+        // from the rest of the timeline. Advance over filtered/hidden rows,
+        // but keep the cursor before the lookahead so it is never skipped.
+        let hasMore = offset < snapshot.items.length;
+        if (!hasMore) {
+          let scanAfter = after;
+          while (items.length <= input.limit) {
+            const slice = await rankContinuation(context.db, {
+              viewerId,
+              snapshot,
+              after: scanAfter,
+              limit: POST_PAGE_SIZE_MAX,
+            });
+            if (slice.length === 0) break;
+            const hydrated = await hydrateRankedSlice({
+              db: context.db,
+              viewerId,
+              scope,
+              slice,
+              q,
+              gameHashtagKey: snapshot.gameHashtagKey,
+            });
+            const selected = hydrated.slice(0, input.limit + 1 - items.length);
+            const room = input.limit - items.length;
+            items.push(...selected.slice(0, room));
+            if (selected.length > room) {
+              hasMore = true;
+              const last = items.at(-1);
+              const entry = slice.find((candidate) => candidate.postId === last?.id);
+              if (entry) after = { eventAt: entry.eventAt, postId: entry.postId };
+              break;
+            }
+            const lastScanned = slice.at(-1);
+            if (!lastScanned) break;
+            scanAfter = { eventAt: lastScanned.eventAt, postId: lastScanned.postId };
+            after = scanAfter;
+            if (slice.length < POST_PAGE_SIZE_MAX) break;
+          }
+        }
         const rankedPage = {
           items,
-          nextCursor: hasMore ? postRankCursor.encode(snapshot.id, offset) : null,
+          nextCursor: hasMore ? postRankCursor.encode(snapshot.id, offset, after) : null,
         };
         // For you and Discover derive their follow suggestions from the same
         // frozen order; Following carries none by design — its candidates are

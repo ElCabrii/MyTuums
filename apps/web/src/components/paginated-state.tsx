@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { AlertCircle, Loader2, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { m } from "@/paraglide/messages.js";
@@ -14,6 +14,7 @@ export interface PaginatedStateQuery {
   isError: boolean;
   error: { message?: string } | null;
   hasNextPage?: boolean;
+  isFetching?: boolean;
   isFetchingNextPage?: boolean;
   refetch: () => void;
   fetchNextPage?: () => void;
@@ -38,6 +39,7 @@ export function PaginatedState({
   emptyAction,
   listClassName,
   loadingFallback,
+  autoLoad = false,
   children,
 }: {
   query: PaginatedStateQuery;
@@ -62,6 +64,8 @@ export function PaginatedState({
    * exactly.
    */
   loadingFallback?: ReactNode;
+  /** Load the next page near the viewport; retain the button for keyboard/manual use. */
+  autoLoad?: boolean;
   /** The loaded rows, rendered between the wrapper and the "Load more" button. */
   children: ReactNode;
 }) {
@@ -106,20 +110,46 @@ export function PaginatedState({
     <div className={listClassName}>
       {children}
 
-      {query.hasNextPage && (
-        <div className="flex justify-center pt-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void query.fetchNextPage?.()}
-            disabled={query.isFetchingNextPage}
-            className="gap-2 rounded-full"
-          >
-            {query.isFetchingNextPage && <Loader2 className="h-4 w-4 animate-spin" />}
-            <span>{m.common_load_more()}</span>
-          </Button>
-        </div>
-      )}
+      {query.hasNextPage && <LoadMore query={query} autoLoad={autoLoad} />}
+    </div>
+  );
+}
+
+function LoadMore({ query, autoLoad }: { query: PaginatedStateQuery; autoLoad: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const { fetchNextPage, isFetching, isFetchingNextPage } = query;
+  const busy = isFetching || isFetchingNextPage;
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!autoLoad || busy || !fetchNextPage || !element || !("IntersectionObserver" in globalThis))
+      return;
+    let requested = false;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting || requested) return;
+        requested = true;
+        observer.disconnect();
+        void fetchNextPage();
+      },
+      { rootMargin: "400px" },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [autoLoad, busy, fetchNextPage]);
+
+  return (
+    <div ref={ref} className="flex justify-center pt-2">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => void fetchNextPage?.()}
+        disabled={isFetchingNextPage}
+        className="gap-2 rounded-full"
+      >
+        {isFetchingNextPage && <Loader2 className="animate-spin" data-icon="inline-start" />}
+        <span>{m.common_load_more()}</span>
+      </Button>
     </div>
   );
 }

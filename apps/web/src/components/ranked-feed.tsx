@@ -114,6 +114,7 @@ export function RankedFeed({
         </div>
       ) : (
         <PostFeed
+          autoLoad
           feedAtom={feedAtom}
           emptyMessage={emptyMessage}
           emptyAction={emptyAction}

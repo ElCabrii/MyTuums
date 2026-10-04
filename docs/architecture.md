@@ -562,7 +562,19 @@ pure JS function scores them, and a snapshot freezes the order for paging.
    followed. Chronological branches of `post.list` (profiles, bookmarks,
    search, replies, continuations) carry `ranking: null` and are untouched;
    `discover` has no chronological mode and a non-ranked `discover` call is
-   refused.
+   refused. After the frozen selection is exhausted, `rankContinuation`
+   continues through the remaining eligible authored/repost events newest
+   first, without an age or total-post limit. It excludes the snapshot's IDs
+   and events newer than its database creation time, and selects one latest
+   event per original before applying the `(event_at, post_id)` keyset.
+   The cursor retains the snapshot binding and adds this continuation key;
+   existing offset-only cursors still work. The shared hydrator enforces the
+   same live visibility, scope and exact game-token filters. Hidden or
+   nonmatching slices are scanned past; a visible lookahead determines whether
+   another page exists. Only the initial recommendation pool is scored and
+   persisted. The web observes the pagination control near the viewport and
+   fetches another page only while the query is idle, retaining the manual
+   Load more button.
 4. **Bounded maintenance, no cron.** Expiry is enforced at read time
    (`loadRankSnapshot` refuses an expired row immediately); physical cleanup
    is opportunistic and request-time only. Each build sweeps at most 100

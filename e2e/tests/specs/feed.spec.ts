@@ -81,6 +81,19 @@ test.describe("ranked home snapshot (issue #305)", () => {
 });
 
 test.describe("home feed pagination", () => {
+  for (const route of ["/", "/discover"]) {
+    test(`scrolling ${route} automatically loads the next page`, async ({ page, db }) => {
+      const author = await db.createUser(uniqueUser("scroll"));
+      const marker = `Auto scroll ${Date.now().toString()}`;
+      await db.seedPosts(author.id, 41, { content: (index) => `${marker} ${String(index)}` });
+      await page.goto(route === "/discover" ? `/discover?q=${encodeURIComponent(marker)}` : route);
+      const posts = page.getByRole("button", { name: /^Like this post/ });
+      await expect(posts).toHaveCount(20);
+      await page.getByRole("button", { name: "Load more", exact: true }).scrollIntoViewIfNeeded();
+      await expect(posts).toHaveCount(40);
+    });
+  }
+
   test("load more fetches page 2 without duplicating any post", async ({ page, db }) => {
     // A throwaway author, and their own profile feed rather than the global
     // home feed: the global feed accumulates posts from every other spec in

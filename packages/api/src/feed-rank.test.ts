@@ -181,6 +181,21 @@ describe("rank cursor codec", () => {
     expect(codec.decode(codec.encode(snapshotId, 40))).toEqual({ snapshotId, offset: 40 });
   });
 
+  it("validates the chronological continuation key alongside the snapshot", () => {
+    const after = { eventAt: "2020-01-02T03:04:05.678Z", postId: crypto.randomUUID() };
+    expect(codec.decode(codec.encode(snapshotId, 500, after))).toEqual({
+      snapshotId,
+      offset: 500,
+      after,
+    });
+    expect(() =>
+      codec.decode(codec.encode(snapshotId, 500, { ...after, eventAt: "invalid" })),
+    ).toThrow("Malformed pagination cursor.");
+    expect(() =>
+      codec.decode(codec.encode(snapshotId, 500, { ...after, postId: "invalid" })),
+    ).toThrow("Malformed pagination cursor.");
+  });
+
   it("refuses malformed cursors and out-of-range offsets", () => {
     for (const raw of ["not-a-cursor", codec.encode(snapshotId, -1)]) {
       let error: unknown;

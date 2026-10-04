@@ -283,6 +283,13 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
   1024px). Home deliberately shows no suggestions module below 2xl
   (Discover's inline one serves every width), and the legal links stay
   footer-only there.
+  Home and Discover opt into `PostFeed`/`PaginatedState` automatic pagination:
+  the Load more control is observed within 400px of the viewport and fetches
+  only while the query is idle, including background refetches. The button
+  remains available for keyboard/manual use and without IntersectionObserver.
+  Other paginated surfaces retain manual loading. The server cursor continues
+  past the recommendation selection into older eligible posts; the client
+  keeps the same snapshot pinning and expiry recovery throughout.
 
 ## Dependencies and boundaries
 
