@@ -28,6 +28,7 @@ import {
   createPushSender,
   deliverPushNotifications,
 } from "@my-tuums/api/cloudflare-jobs";
+import { translateGameSummary } from "./translate-summary.js";
 
 type JobsEnv = Omit<Env, "GAME_TRANSLATION_ENABLED"> & {
   GAME_TRANSLATION_ENABLED: string;
@@ -159,16 +160,15 @@ export class GameSyncWorkflow extends WorkflowEntrypoint<JobsEnv, JobParams> {
               db: createDatabase(this.env.DB),
               afterGameId,
               translate: async (text) => {
-                const response = await this.env.AI.run(
-                  "@cf/meta/m2m100-1.2b",
-                  {
-                    text,
-                    source_lang: "en",
-                    target_lang: "fr",
-                  },
-                  { signal: AbortSignal.timeout(30_000) },
-                );
-                return "translated_text" in response ? (response.translated_text ?? "") : "";
+                const signal = AbortSignal.timeout(30_000);
+                return translateGameSummary(text, async (chunk) => {
+                  const response = await this.env.AI.run(
+                    "@cf/meta/m2m100-1.2b",
+                    { text: chunk, source_lang: "en", target_lang: "fr" },
+                    { signal },
+                  );
+                  return "translated_text" in response ? (response.translated_text ?? "") : "";
+                });
               },
             });
           } catch {

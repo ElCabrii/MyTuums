@@ -233,8 +233,14 @@ and `hasMore`; failed descriptions retry on the next sync (or another
 `pnpm games:sync` in the selected environment). Catalog publication succeeds
 independently of item translation failures. French pages fall back to English
 until a translation matches the current source. Setting the jobs variable to
-`false` stops new inference while retaining stored translations. Translation
-quality still requires a hosted sample review before rollout.
+`false` stops new inference while retaining stored translations. Review hosted
+samples when changing the model or sentence segmentation.
+
+Descriptions are translated sentence by sentence, splitting long sentences at word
+boundaries into at most 300-character requests, because the model can skip sentences
+or silently cut off longer translations. All chunks
+must succeed within the description's 30-second deadline before anything is saved;
+paragraph breaks are retained.
 
 `reconcile:media` always binds the selected database and its
 matching private bucket. Notification pruning is a dry run unless `--apply` is
