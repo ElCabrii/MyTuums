@@ -34,10 +34,11 @@ deploys preview through the ordered command in
   It uses synthetic Access/mail/Stream providers and never loads bucket secrets.
 - All three jobs use the self-hosted runner, Node 24 and the frozen pnpm lockfile.
   Browser system libraries must already be installed on that runner.
-- Verification jobs have a 30-minute timeout. Push and pull-request events share
-  the head branch concurrency key. Pull requests cancel superseded runs; pushes
-  finish because cancellation during migrations or a multi-Worker deployment
-  could leave an environment on mixed versions.
+- Verification jobs have a 30-minute timeout. Workflow concurrency is scoped by
+  event type and PR number or branch name. New commits cancel older runs of the
+  same PR without cancelling a push run. Active pushes finish because cancellation
+  during migrations or a multi-Worker deployment could leave an environment on
+  mixed versions; newer pushes to the same branch wait for the active run.
   `TMPDIR` uses the runner-owned temporary directory, avoiding the host
   `/tmp` quota that previously caused SQLite write failures during badge tests.
   Turbo explicitly passes `TMPDIR` through its strict environment filter; setting

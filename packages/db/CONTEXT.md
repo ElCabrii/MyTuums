@@ -222,7 +222,9 @@ from `apps/server/wrangler.preview.jsonc`; the default remains local. Never use 
 snapshot importer against an environment that is accepting writes.
 
 `deploy:preview` gates a clean allowed branch against the exact commit’s latest
-GitHub Actions Verify, E2E tests and Docker image builds results. Production
+GitHub Actions Verify, E2E tests and Docker image builds results. It
+waits up to thirty minutes for newer pending checks on that commit; failed,
+cancelled, missing or foreign checks still refuse deployment immediately. Production
 requires `main`; preview requires `release/**`. Retired migration targets and
 all other branches are refused. It then builds and
 deploys migrations, the private link fetcher, jobs and app in order; production
