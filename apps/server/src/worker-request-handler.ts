@@ -20,6 +20,8 @@ export interface WorkerRequestDependencies {
     request: Request,
     waitUntil?: (promise: Promise<unknown>) => void,
   ): Promise<Response | null>;
+  /** The authenticated user's live message-event stream (GET /events/messages). */
+  streamMessageEvents(userId: string, request: Request): Promise<Response>;
   /** Explicit asset lookup; configure the binding without an automatic SPA fallback. */
   fetchAsset(request: Request): Promise<Response>;
   /** Public post/game metadata is injected only when serving the app document. */
@@ -278,6 +280,16 @@ export function createWorkerRequestHandler(deps: WorkerRequestDependencies) {
       }
       // Reserved prefixes never fall through to a successful app document.
       if (prefix(path, "/api") || url.pathname.startsWith("/rpc")) return reply(404, "Not found");
+      // The message-event stream (issue #408): session-authorized here like
+      // /media — it is not oRPC — then served by the user's MessageHub. The
+      // stream's own lifetime bound is what reauthorizes on reconnect.
+      if (prefix(path, "/events/messages")) {
+        if (request.method !== "GET") return reply(405, "Method not allowed", { Allow: "GET" });
+        const session = hasSessionCookie(request) ? await deps.resolveSession(request) : null;
+        if (session?.kind === "unavailable") return reply(503, "Service unavailable");
+        if (!session || session.kind !== "authenticated") return reply(401, "Unauthorized");
+        return deps.streamMessageEvents(session.userId, request);
+      }
       if (request.method !== "GET" && request.method !== "HEAD")
         return reply(405, "Method not allowed", { Allow: "GET, HEAD" });
 

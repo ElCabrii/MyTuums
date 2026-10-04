@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { getRouteApi, Link, Outlet } from "@tanstack/react-router";
+import { getRouteApi, Link, Outlet, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { ProfileEditDialog } from "@/components/profile-edit-dialog";
 import { AccountMenu } from "@/components/account-menu";
@@ -97,6 +97,7 @@ export function ProfileSkeleton() {
  */
 export function ProfileLayout() {
   const { username } = routeApi.useParams();
+  const navigate = useNavigate();
   const viewer = useAtomValue(viewerAtom);
   const setReportDialog = useSetAtom(reportDialogAtom);
   const setBlockDialog = useSetAtom(blockDialogAtom);
@@ -274,6 +275,16 @@ export function ProfileLayout() {
                   <MoreHorizontal className="h-4 w-4" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="min-w-44">
+                  {/* Opens or creates the pair's conversation — the pane at
+                      /messages/new resolves which (issue #408). */}
+                  <DropdownMenuItem
+                    className="cursor-pointer"
+                    onClick={() =>
+                      void navigate({ to: "/messages/new/$userId", params: { userId: profile.id } })
+                    }
+                  >
+                    {m.profile_message()}
+                  </DropdownMenuItem>
                   <DropdownMenuItem
                     className="cursor-pointer"
                     onClick={() => setReportDialog({ targetType: "user", targetId: profile.id })}

@@ -32,6 +32,7 @@ export function readMediaReferences(db: Database) {
       json_each(json_array(image, image_original, banner_image, banner_image_original)) as profile
     union all select media_path from (
       select media_path from post_attachment
+      union all select media_path from message_attachment
       union all select image_media_path from link_card
       union all select cover_media_path from game
     )

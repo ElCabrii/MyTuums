@@ -10,10 +10,12 @@ import {
   createJobDispatcher,
 } from "@my-tuums/api/cloudflare-app";
 import { createDistributedRateLimiter } from "@my-tuums/api/distributed-rate-limit";
+import { createMessageNotifier } from "@my-tuums/api/message-events";
 import { createAuthRateLimitStorage } from "@my-tuums/auth/rate-limit-storage";
 import { createWorkerApplication } from "./application.js";
 export { RateLimitCounter } from "./rate-limit-counter.js";
 export { AuthRateLimitCounter } from "./auth-rate-limit-counter.js";
+export { MessageHub } from "./message-hub.js";
 
 const configuration = z
   .object({
@@ -30,6 +32,10 @@ const configuration = z
     GOOGLE_ANALYTICS: z.enum(["enabled", "disabled"]).default("disabled"),
     BETTER_AUTH_SECRET: z.string().min(32),
     APPEAL_TOKEN_SECRET: z.string().min(32),
+    WEB_PUSH_PUBLIC_KEY: z
+      .string()
+      .regex(/^B[A-Za-z0-9_-]{86}$/)
+      .optional(),
     STREAM_API_TOKEN: z.string().min(1),
     GOOGLE_CLIENT_ID: z.string().min(1),
     GOOGLE_CLIENT_SECRET: z.string().min(1),
@@ -76,13 +82,17 @@ async function application(env: AppEnv) {
     services: {
       db,
       webOrigin: config.WEB_ORIGIN,
+      webPushPublicKey: config.WEB_PUSH_PUBLIC_KEY,
       storage: createR2Storage(env.MEDIA),
       videoUploads: createVideoUploads(db, stream, jobs),
+      videoJobs: jobs,
       rateLimiter: createDistributedRateLimiter(env.API_COUNTERS),
       appealToken: createAppealTokenSigner(config.APPEAL_TOKEN_SECRET),
       emailSender: { send: sendEmail },
+      messageNotifier: createMessageNotifier(env.MESSAGE_HUB),
       linkTransport: createWorkerLinkTransport(env.LINK_FETCHER),
     },
+    messageHub: env.MESSAGE_HUB,
     bucket: env.MEDIA,
     images: env.IMAGES,
     stream,

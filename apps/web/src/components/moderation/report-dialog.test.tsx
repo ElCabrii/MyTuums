@@ -48,6 +48,47 @@ async function openReportDialog(target: ReportDialogTarget) {
 }
 
 describe("ReportDialog", () => {
+  it("previews and reports a media-only message", async () => {
+    fakeClient.moderation.report.mockResolvedValue({ reported: true });
+    const { store } = await openReportDialog({
+      targetType: "message",
+      targetId: "media-only",
+      body: "",
+      attachments: [
+        {
+          id: "image",
+          kind: "image",
+          url: "/media/messages/media-only/image.png",
+          contentType: "image/png",
+          byteSize: 100,
+          position: 0,
+          width: 2,
+          height: 2,
+          durationMs: null,
+          video: null,
+        },
+      ],
+    });
+    expect(
+      await screen.findByRole("img", { name: m.messages_media_image_label({ name: "1" }) }),
+    ).toHaveAttribute("src", "/media/messages/media-only/image.png");
+    expect(screen.queryByText(m.messages_tombstone())).not.toBeInTheDocument();
+    act(() => store.set(reportReasonAtom, "spam"));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: m.moderation_report_submit() }));
+    await waitFor(() =>
+      expect(fakeClient.moderation.report).toHaveBeenCalledWith(
+        {
+          targetType: "message",
+          targetId: "media-only",
+          reason: "spam",
+        },
+        expect.anything(),
+      ),
+    );
+  });
+
   it("keeps Report disabled until a reason is picked, then submits the post target", async () => {
     fakeClient.moderation.report.mockResolvedValue({ reported: true });
     const { store } = await openReportDialog({

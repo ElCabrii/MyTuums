@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { requireDeploymentBranch, requirePreviewChecks } from "./preview-deploy-checks.js";
+import { setImmediate } from "node:timers/promises";
+import {
+  requireDeploymentBranch,
+  requirePreviewChecks,
+  waitForPreviewChecks,
+} from "./preview-deploy-checks.js";
 
 const commit = "a".repeat(40);
 const checks = ["Verify", "E2E tests", "Docker image builds"].map((name, id) => ({
@@ -61,4 +66,64 @@ await test("a passing application suite cannot substitute for the required Conta
       ),
     /Docker image builds/,
   );
+});
+
+await test("a release push waits for newer PR checks on the same commit before deployment", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const newer = { ...checks[0], id: 100, status: "queued", conclusion: null };
+  let runs = [...checks, newer];
+  let outcome = "pending";
+  const result = waitForPreviewChecks(commit, () =>
+    Promise.resolve(JSON.stringify({ total_count: runs.length, check_runs: runs })),
+  ).then(
+    () => {
+      outcome = "passed";
+    },
+    () => {
+      outcome = "rejected";
+    },
+  );
+  await setImmediate();
+  assert.equal(outcome, "pending");
+
+  runs = [...checks, { ...newer, status: "completed", conclusion: "success" }];
+  t.mock.timers.tick(10_000);
+  await result;
+  assert.equal(outcome, "passed");
+});
+
+await test("a completed failure stops the deployment wait even when another check is pending", async () => {
+  const runs = [
+    ...checks,
+    { ...checks[0], id: 100, status: "in_progress", conclusion: null },
+    { ...checks[1], id: 101, conclusion: "failure" },
+  ];
+  await assert.rejects(
+    waitForPreviewChecks(commit, () =>
+      Promise.resolve(JSON.stringify({ total_count: runs.length, check_runs: runs })),
+    ),
+    /E2E tests check must pass/,
+  );
+});
+
+await test("pending checks cannot hold a deployment indefinitely", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const runs = [...checks, { ...checks[0], id: 100, status: "in_progress", conclusion: null }];
+  let outcome = "pending";
+  const result = waitForPreviewChecks(commit, () =>
+    Promise.resolve(JSON.stringify({ total_count: runs.length, check_runs: runs })),
+  ).then(
+    () => {
+      outcome = "passed";
+    },
+    () => {
+      outcome = "rejected";
+    },
+  );
+  await setImmediate();
+  assert.equal(outcome, "pending");
+
+  t.mock.timers.tick(31 * 60_000);
+  await result;
+  assert.equal(outcome, "rejected");
 });

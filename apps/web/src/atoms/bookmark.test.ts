@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
-import { QueryClient, type InfiniteData } from "@tanstack/react-query";
+import { InfiniteQueryObserver, QueryClient, type InfiniteData } from "@tanstack/react-query";
 
 // The mock mirrors the real client's procedure tree — the post-cache sweep in
 // `updatePostEverywhere` walks `orpc.post.list`/`orpc.search.posts` keys, so a
@@ -78,6 +78,59 @@ function freshStoreWithPost(post: Post) {
 }
 
 describe("toggleBookmarkAtomFamily", () => {
+  it.each(["completed", "pending"] as const)(
+    "refreshes a %s bookmarks read when a pending save completes",
+    async (readState) => {
+      const saved = makePost({ id: "pending-bookmark", viewerHasBookmarked: true });
+      const { store, queryClient } = freshStoreWithPost({ ...saved, viewerHasBookmarked: false });
+      let resolveSave!: (value: { postId: string; viewerHasBookmarked: boolean }) => void;
+      const save = new Promise((resolve) => {
+        resolveSave = resolve;
+      });
+      let resolveFirstRead!: (value: PostListPage) => void;
+      const firstRead = new Promise((resolve) => {
+        resolveFirstRead = resolve;
+      });
+      const emptyPage: PostListPage = {
+        items: [],
+        nextCursor: null,
+        gameMentions: {},
+        ranking: null,
+      };
+      fakeClient.post.bookmark.mockReturnValue(save);
+      fakeClient.post.list.mockReturnValueOnce(firstRead).mockResolvedValue({
+        ...emptyPage,
+        items: [saved],
+      });
+
+      store.set(toggleBookmarkAtomFamily(saved.id));
+      const observer = new InfiniteQueryObserver(
+        queryClient,
+        postListQueryOptions({ feed: "bookmarks" }),
+      );
+      const unsubscribe = observer.subscribe(() => {});
+      try {
+        if (readState === "completed") {
+          resolveFirstRead(emptyPage);
+          await vi.waitFor(() =>
+            expect(observer.getCurrentResult().data?.pages[0]?.items).toEqual([]),
+          );
+        }
+        resolveSave({ postId: saved.id, viewerHasBookmarked: true });
+
+        await vi.waitFor(() => {
+          expect(observer.getCurrentResult().data?.pages[0]?.items).toEqual([saved]);
+        });
+        resolveFirstRead(emptyPage);
+        await firstRead;
+        expect(observer.getCurrentResult().data?.pages[0]?.items).toEqual([saved]);
+      } finally {
+        unsubscribe();
+        queryClient.clear();
+      }
+    },
+  );
+
   it("lands the optimistic patch synchronously, before the mutationFn resolves, and touches only the bookmark flag", () => {
     const { store, queryClient } = freshStoreWithPost(
       makePost({ id: "post-1", viewerHasBookmarked: false, likeCount: 4 }),

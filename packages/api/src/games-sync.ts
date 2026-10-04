@@ -591,3 +591,155 @@ async function buildGamesCatalog(
 
   return result;
 }
+
+/** IGDB returned no record for a requested id — nothing was staged or published. */
+export class UnknownIgdbGameError extends Error {
+  constructor(igdbId: number) {
+    super(`IGDB returned no game for id ${igdbId}.`);
+    this.name = "UnknownIgdbGameError";
+  }
+}
+
+export type AddGameResult =
+  | { status: "added"; name: string; hashtagKey: string; coverUploaded: boolean }
+  | { status: "already-present"; name: string };
+
+interface AddGameDeps {
+  db: Database;
+  storage: Pick<ObjectStorage, "put" | "remove"> | null;
+  transport: IgdbTransport;
+  clientId: string;
+  clientSecret: string;
+  igdbId: number;
+  now?: () => Date;
+}
+
+/**
+ * Adds one game to the live catalog by IGDB id — the operator's complement to
+ * the popularity-driven sync, for a game the scans will never select. The same
+ * fenced publisher as sync and seeding: the newcomer is hydrated, every
+ * incumbent is staged verbatim beside it, and publication is atomic, so a
+ * failure leaves the previous catalog untouched and the added game becomes a
+ * known id the daily sync keeps refreshing from then on (Q29).
+ */
+export async function addGameToCatalog(deps: AddGameDeps): Promise<AddGameResult> {
+  const now = deps.now?.() ?? new Date();
+  const version = await beginGameCatalog(deps.db, now);
+  try {
+    return await appendGameToCatalog(deps, version, now);
+  } finally {
+    await releaseGameCatalog(deps.db, version);
+    await cleanupGameCatalogVersions(deps.db).catch(() => {
+      console.error({ event: "catalog_version_cleanup_deferred" });
+    });
+  }
+}
+
+async function appendGameToCatalog(
+  deps: AddGameDeps,
+  version: string,
+  now: Date,
+): Promise<AddGameResult> {
+  const incumbents = await deps.db.select().from(game);
+  const incumbent = incumbents.find((row) => row.igdbId === deps.igdbId);
+  if (incumbent) return { status: "already-present", name: incumbent.name };
+
+  const client = createIgdbClient({
+    clientId: deps.clientId,
+    clientSecret: deps.clientSecret,
+    transport: deps.transport,
+  });
+  const [source] = await hydrateGames(client, [deps.igdbId]);
+  if (!source) throw new UnknownIgdbGameError(deps.igdbId);
+  if (source.name.trim() === "") {
+    throw new CatalogValidationError(`igdb ${deps.igdbId} hydrated with no name`);
+  }
+  // New rows need the slug — the sync only tolerates its absence for known ids.
+  if (source.slug.trim() === "") {
+    throw new CatalogValidationError(`igdb ${deps.igdbId} hydrated with no slug`);
+  }
+
+  const year = releaseYear(source.first_release_date);
+  const staged: StagedGameRow[] = incumbents.map((row) => ({
+    igdbId: row.igdbId,
+    slug: row.slug,
+    hashtagKey: row.hashtagKey,
+    name: row.name,
+    summary: row.summary,
+    coverMediaPath: row.coverMediaPath,
+    coverImageId: row.coverImageId,
+    firstReleaseYear: row.firstReleaseYear,
+    firstReleaseDate: row.firstReleaseDate,
+    hypeCount: row.hypeCount,
+    genres: [...row.genres],
+    platforms: [...row.platforms],
+    popularityRank: row.popularityRank,
+  }));
+
+  // A cover uploads only with storage, and its compare key is recorded only
+  // once the object exists — a null pair is what makes the next daily sync
+  // upload a cover this run could not.
+  let coverUploaded = false;
+  let coverMediaPath: string | null = null;
+  let coverImageId: string | null = null;
+  const desiredImageId = source.cover?.image_id ?? null;
+  if (deps.storage && desiredImageId !== null) {
+    // Unlike the sync's per-game tolerance, a single-game add has no previous
+    // cover to keep: a failed download fails the run so the operator retries
+    // instead of silently shipping a coverless row.
+    const cover = await client.fetchCoverImage(desiredImageId);
+    const key = gameCoverObjectKey(
+      deps.igdbId,
+      desiredImageId,
+      IMAGE_EXTENSION[cover.contentType],
+      version,
+    );
+    await beginMediaUpload(deps.db, `catalog:${version}`, [mediaPathFor(key)]);
+    await deps.storage.put(key, cover.bytes, cover.contentType);
+    coverMediaPath = mediaPathFor(key);
+    coverImageId = desiredImageId;
+    coverUploaded = true;
+  }
+
+  staged.push({
+    igdbId: deps.igdbId,
+    slug: source.slug.trim(),
+    // Placeholder, like the sync's newcomer rows; replaced right below.
+    hashtagKey: "",
+    name: source.name.trim(),
+    summary:
+      source.summary != null && source.summary.trim() !== ""
+        ? truncate(source.summary.trim(), GAME_SUMMARY_MAX_LENGTH)
+        : null,
+    coverMediaPath,
+    coverImageId,
+    firstReleaseYear: year,
+    firstReleaseDate: source.first_release_date ?? null,
+    hypeCount: source.hypes ?? 0,
+    genres: normalizeLabels(source.genres, GAME_GENRES_MAX),
+    platforms: normalizeLabels(
+      (source.platforms ?? []).map((platform) => ({
+        name: platform.abbreviation ?? platform.name ?? null,
+      })),
+      GAME_PLATFORMS_MAX,
+    ),
+    // Outside the Twitch scan by construction; the incumbent rules keep ranks.
+    popularityRank: null,
+  });
+
+  const assignments = assignHashtagKeys(
+    [{ igdbId: deps.igdbId, name: source.name, firstReleaseYear: year }],
+    new Set(incumbents.map((row) => row.hashtagKey)),
+  );
+  const added = staged[staged.length - 1];
+  const assigned = assignments.get(deps.igdbId);
+  if (assigned !== undefined) added.hashtagKey = assigned;
+
+  // The same fail-closed gate as the sync: every incumbent re-staged verbatim,
+  // the newcomer complete, or nothing publishes.
+  validateStaged(staged, now.getUTCFullYear() + 5);
+  await stageGameCatalog(deps.db, version, staged);
+  await publishGameCatalog(deps.db, version, staged.length);
+
+  return { status: "added", name: added.name, hashtagKey: added.hashtagKey, coverUploaded };
+}

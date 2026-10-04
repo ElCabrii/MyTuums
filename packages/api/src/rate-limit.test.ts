@@ -297,12 +297,12 @@ describe("createRateLimiter", () => {
 });
 
 describe("RATE_LIMITS", () => {
-  it("defines fourteen tiers with distinct names", () => {
+  it("defines fifteen tiers with distinct names", () => {
     const policies = Object.values(RATE_LIMITS);
-    expect(policies).toHaveLength(14);
+    expect(policies).toHaveLength(15);
     // Distinct names are the whole mechanism: `name` namespaces the counter, so
     // two tiers sharing one would silently share a budget.
-    expect(new Set(policies.map((p) => p.name)).size).toBe(14);
+    expect(new Set(policies.map((p) => p.name)).size).toBe(15);
     // And the moderation tiers exist at all — a tier dropped from RATE_LIMITS
     // would unmask the procedure that names it in its `.use(rateLimit(...))`.
     expect(Object.keys(RATE_LIMITS)).toEqual(

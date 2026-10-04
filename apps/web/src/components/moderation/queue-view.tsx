@@ -4,6 +4,7 @@ import {
   FileText,
   Gavel,
   Inbox,
+  MailQuestion,
   RefreshCw,
   ShieldAlert,
   UserRound,
@@ -156,10 +157,14 @@ function QueueSkeleton() {
 /** The target preview a queue row renders, or `null` when the target row is gone. */
 type CasePreview = ModerationCase["preview"];
 
-/** Whoever a case is about: the reported post's author, or the reported account. */
+/** Whoever a case is about: the reported post's author, the reported account, or the reported message's sender. */
 function personOf(preview: CasePreview) {
   if (preview === null) return null;
-  return preview.kind === "post" ? preview.author : preview.user;
+  return preview.kind === "post"
+    ? preview.author
+    : preview.kind === "user"
+      ? preview.user
+      : preview.sender;
 }
 
 /**
@@ -181,6 +186,7 @@ function personOf(preview: CasePreview) {
 function QueueRow({ item }: { item: ModerationCase }) {
   const setOpenCase = useSetAtom(caseDialogAtom);
   const isPost = item.targetType === "post";
+  const isMessage = item.targetType === "message";
   const locale = getLocale();
   const preview = item.preview;
   const person = personOf(preview);
@@ -208,14 +214,24 @@ function QueueRow({ item }: { item: ModerationCase }) {
           // No preview means the target row is gone, so there is no face to
           // put here — the generic glyph at least keeps the row's shape.
           <span className="bg-muted text-muted-foreground flex size-9 items-center justify-center rounded-full">
-            {isPost ? <FileText className="size-4" /> : <UserRound className="size-4" />}
+            {isPost ? (
+              <FileText className="size-4" />
+            ) : isMessage ? (
+              <MailQuestion className="size-4" />
+            ) : (
+              <UserRound className="size-4" />
+            )}
           </span>
         )}
       </ItemMedia>
       <ItemContent>
         <ItemTitle className="flex-wrap">
           <span>
-            {isPost ? m.moderation_queue_target_post() : m.moderation_queue_target_user()}
+            {isPost
+              ? m.moderation_queue_target_post()
+              : isMessage
+                ? m.moderation_queue_target_message()
+                : m.moderation_queue_target_user()}
           </span>
           <span className="text-muted-foreground text-xs font-normal">
             {item.reportCount === 1
@@ -297,6 +313,12 @@ function TargetStateBadges({ preview }: { preview: CasePreview }) {
     );
   }
 
+  if (preview.kind === "message") {
+    return preview.deleted ? (
+      <Badge variant="outline">{m.moderation_case_deleted_badge()}</Badge>
+    ) : null;
+  }
+
   if (!preview.banned) return null;
   return (
     <Badge variant="outline">
@@ -323,7 +345,7 @@ function TargetLine({ preview }: { preview: CasePreview }) {
         {person.name || handle || m.user_unknown()}
       </span>
       {handle && <span> @{handle}</span>}
-      {preview.kind === "post" && preview.excerpt && (
+      {(preview.kind === "post" || preview.kind === "message") && preview.excerpt && (
         <>
           {" — "}
           {preview.excerpt}

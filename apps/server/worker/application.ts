@@ -4,6 +4,7 @@ import {
   type ApiServices,
   type StreamService,
   canViewPostMedia,
+  canViewMessageMedia,
   canViewProfileMedia,
   canViewLinkCardMedia,
   canViewGameCoverMedia,
@@ -21,6 +22,8 @@ import { createWorkerMediaResolver } from "./media.js";
 export async function createWorkerApplication(options: {
   auth: Auth;
   services: ApiServices;
+  /** The per-user SSE hub behind `GET /events/messages`. */
+  messageHub: DurableObjectNamespace;
   assets: { fetch(request: Request): Promise<Response> };
   bucket: R2Bucket;
   images: ImagesBinding;
@@ -36,6 +39,7 @@ export async function createWorkerApplication(options: {
     images: options.images,
     async authorize(key, viewerId) {
       if (key.startsWith("posts/")) return canViewPostMedia(db, key, viewerId);
+      if (key.startsWith("messages/")) return canViewMessageMedia(db, key, viewerId);
       if (key.startsWith("link-cards/")) return canViewLinkCardMedia();
       if (key.startsWith("games/")) return canViewGameCoverMedia();
       return canViewProfileMedia(db, key, viewerId);
@@ -72,6 +76,13 @@ export async function createWorkerApplication(options: {
       });
     },
     fetchAsset: (request) => options.assets.fetch(request),
+    // The authenticated user's hub instance streams the response; the abort
+    // signal rides the proxied request so a client disconnect reaches the
+    // stream's cleanup, and stream lifetime bounds reauthorize on reconnect.
+    streamMessageEvents: (userId, request) =>
+      options.messageHub
+        .getByName(userId)
+        .fetch(new Request("https://message-hub/connect", request)),
     transformDocument: createWorkerDocumentTransform(createPublicHeadTransform(db, webOrigin)),
     responseHeaders: await workerResponseHeaders(options),
     observe: (event) => console.error(event),

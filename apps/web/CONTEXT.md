@@ -19,23 +19,24 @@ app's build from the same origin.
 
 ## Change map
 
-| Intent                                                      | Primary                                                                                                                                          | Also touch                                                                                                                                                                                                         |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Add a page                                                  | `src/routes/<name>.tsx` (thin wrapper)                                                                                                           | the page body in `src/components/`; the signed-out allowlist (`isSignedOutPath`) if it must work signed out; a stub in `src/test/route-tree.tsx` (checked by the canonical inventory test in `route-tree.test.ts`) |
-| Add client state                                            | `src/atoms/<concern>.ts`                                                                                                                         | its `.test.ts` sibling                                                                                                                                                                                             |
-| Read server data                                            | a new `atomWithQuery` / `atomWithInfiniteQuery` in `src/atoms/`                                                                                  | `src/lib/query-definitions.ts`; `src/lib/orpc.ts` for response types                                                                                                                                               |
-| Add a mutation with optimism                                | `src/atoms/<concern>.ts`                                                                                                                         | use `beginFollowPatch` / `beginPostPatch` in `src/lib/follow-cache.ts` / `post-cache.ts` — they own their cache inventory, cancellation and snapshot; roll back via `restoreFollowCaches` / `restorePosts`         |
-| Add a UI component                                          | `pnpm --filter @my-tuums/web exec shadcn add <component>`                                                                                        | never hand-write into `src/components/ui`                                                                                                                                                                          |
-| Add or change copy                                          | `messages/en.json`, `messages/fr.json`                                                                                                           | recompile; never touch `src/paraglide`                                                                                                                                                                             |
-| Router-touching behaviour                                   | `src/hooks/`                                                                                                                                     | never an atom — see the invariants                                                                                                                                                                                 |
-| Change an auth flow page                                    | `src/routes/` + `src/atoms/auth.ts`                                                                                                              | `src/lib/auth-validation.ts` (form policy only — the rules live in `@my-tuums/auth/rules`)                                                                                                                         |
-| Change the legal consent gate                               | `src/atoms/legal-consent.ts`, `src/components/legal-consent-dialog.tsx`                                                                          | `LEGAL_VERSION` in `@my-tuums/auth/rules`; `e2e/support/users.ts` seeds consent for every fixture                                                                                                                  |
-| Add release notes                                           | `changelog/`                                                                                                                                     | `src/build/changelog.ts` compiles the current version; `src/components/changelog-dialog.tsx` owns display                                                                                                          |
-| Add a moderation surface                                    | `src/atoms/moderation.ts`, `src/components/moderation/`                                                                                          | `src/hooks/use-require-role.ts`                                                                                                                                                                                    |
-| Change a public route's crawler head                        | `apps/server/src/public-heads.ts` (server half), this app's `index.html` marker block                                                            | keep the title/description copy in step with `src/lib/document-head.ts` and `messages/en.json`                                                                                                                     |
-| Change the notifications surface                            | `src/atoms/notifications.ts`, `src/components/notifications-page.tsx`                                                                            | the unread badge on the header bell (`src/components/header.tsx`); the per-type copy in `messages/`                                                                                                                |
-| Change a ranked feed (order, refresh, suggestions, prompts) | `src/components/ranked-feed.tsx`, `src/components/who-to-follow.tsx`, `src/atoms/post-feed.ts` (snapshot pinning, `refreshRankedFeedAtomFamily`) | `src/lib/ranking.ts` (the `ranking` readers, the expiry matcher); `src/lib/query-definitions.ts` (`isRankableFeedParams`, the ranked key segment); `src/lib/follow-cache.ts` (suggestion-row sweeps)               |
-| Change the badge surfaces                                   | `src/components/profile-badges.tsx`                                                                                                              | the catalog ids/tiers come from `@my-tuums/api/badges` (never restated); the localized names in `messages/` are keyed by badge id                                                                                  |
+| Intent                                                      | Primary                                                                                                                                          | Also touch                                                                                                                                                                                                           |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a page                                                  | `src/routes/<name>.tsx` (thin wrapper)                                                                                                           | the page body in `src/components/`; the signed-out allowlist (`isSignedOutPath`) if it must work signed out; a stub in `src/test/route-tree.tsx` (checked by the canonical inventory test in `route-tree.test.ts`)   |
+| Add client state                                            | `src/atoms/<concern>.ts`                                                                                                                         | its `.test.ts` sibling                                                                                                                                                                                               |
+| Read server data                                            | a new `atomWithQuery` / `atomWithInfiniteQuery` in `src/atoms/`                                                                                  | `src/lib/query-definitions.ts`; `src/lib/orpc.ts` for response types                                                                                                                                                 |
+| Add a mutation with optimism                                | `src/atoms/<concern>.ts`                                                                                                                         | use `beginFollowPatch` / `beginPostPatch` in `src/lib/follow-cache.ts` / `post-cache.ts` — they own their cache inventory, cancellation and snapshot; roll back via `restoreFollowCaches` / `restorePosts`           |
+| Add a UI component                                          | `pnpm --filter @my-tuums/web exec shadcn add <component>`                                                                                        | never hand-write into `src/components/ui`                                                                                                                                                                            |
+| Add or change copy                                          | `messages/en.json`, `messages/fr.json`                                                                                                           | recompile; never touch `src/paraglide`                                                                                                                                                                               |
+| Router-touching behaviour                                   | `src/hooks/`                                                                                                                                     | never an atom — see the invariants                                                                                                                                                                                   |
+| Change an auth flow page                                    | `src/routes/` + `src/atoms/auth.ts`                                                                                                              | `src/lib/auth-validation.ts` (form policy only — the rules live in `@my-tuums/auth/rules`)                                                                                                                           |
+| Change the legal consent gate                               | `src/atoms/legal-consent.ts`, `src/components/legal-consent-dialog.tsx`                                                                          | `LEGAL_VERSION` in `@my-tuums/auth/rules`; `e2e/support/users.ts` seeds consent for every fixture                                                                                                                    |
+| Add release notes                                           | `changelog/`                                                                                                                                     | `src/build/changelog.ts` compiles the current version; `src/components/changelog-dialog.tsx` owns display                                                                                                            |
+| Add a moderation surface                                    | `src/atoms/moderation.ts`, `src/components/moderation/`                                                                                          | `src/hooks/use-require-role.ts`                                                                                                                                                                                      |
+| Change a public route's crawler head                        | `apps/server/src/public-heads.ts` (server half), this app's `index.html` marker block                                                            | keep the title/description copy in step with `src/lib/document-head.ts` and `messages/en.json`                                                                                                                       |
+| Change the notifications surface                            | `src/atoms/notifications.ts`, `src/components/notifications-page.tsx`                                                                            | the unread badge on the header bell (`src/components/header.tsx`); the per-type copy in `messages/`                                                                                                                  |
+| Change private messages                                     | `src/atoms/messages.ts`, `src/components/messages-page.tsx`, `src/components/message-thread.tsx`, `src/components/message-requests-page.tsx`     | the thread families sweep in `src/atoms/session-teardown.ts`; the subscription in `src/hooks/use-message-events.ts` (invalidation-only — payloads stay in D1-backed procedures); the badge on the header mail action |
+| Change a ranked feed (order, refresh, suggestions, prompts) | `src/components/ranked-feed.tsx`, `src/components/who-to-follow.tsx`, `src/atoms/post-feed.ts` (snapshot pinning, `refreshRankedFeedAtomFamily`) | `src/lib/ranking.ts` (the `ranking` readers, the expiry matcher); `src/lib/query-definitions.ts` (`isRankableFeedParams`, the ranked key segment); `src/lib/follow-cache.ts` (suggestion-row sweeps)                 |
+| Change the badge surfaces                                   | `src/components/profile-badges.tsx`                                                                                                              | the catalog ids/tiers come from `@my-tuums/api/badges` (never restated); the localized names in `messages/` are keyed by badge id                                                                                    |
 
 ## Invariants
 
@@ -52,8 +53,8 @@ app's build from the same origin.
   must not cause already-accepted bytes to be resent. Upload session IDs survive
   cancellation during begin so the caller can cancel the durable obligation.
   Selection/completion never submits a post. Successful submission clears the
-  draft; explicit removal cancels the upload. The native API/client protocol is
-  implemented; the Cloudflare Worker entrypoint remains to wire.
+  draft; explicit removal cancels the upload. The deployed Worker binds the
+  native Stream adapter for this protocol.
 - **A video selection is preflighted locally before it becomes state (issue
   #404).** `src/lib/video-preflight.ts` checks the shared decimal byte cap,
   duration, orientation-aware dimensions and the encoded frame rate before
@@ -135,6 +136,12 @@ app's build from the same origin.
   best-effort sweep so chunk loading cannot block sign-out.
   Notifications, the moderation queue and the audit log use single query
   atoms: their data is cleared by the QueryClient, with no family to sweep.
+- **Message mutation callbacks belong to their initiating viewer.** QueryClient
+  teardown cannot cancel an already-issued mutation. Each delete, request,
+  read and hide mutation records its viewer in the invocation context; late
+  rollback and success callbacks must not restore private snapshots or patch
+  another viewer's inbox after logout (issue #408). Sends apply the same
+  viewer check before reconciling plaintext.
 - **Like and follow serialise per entity.** One `scope` id per entity,
   per-entity intent atoms drop superseded responses, and rollback rides on
   mutation-level `onError` — per-call callbacks never fire for write-only
@@ -144,6 +151,10 @@ app's build from the same origin.
   because a repost is a feed _event_ whose position is server-ordered — a new
   one lands at the top of the home feeds, and an unrepost removes one from
   them.
+- **A confirmed bookmark refreshes the saved list.** Cancel any older bookmarks
+  read before invalidating that feed, including an unfinished first load:
+  navigation can reach the saved page while the write is still pending.
+  Confirmed unbookmarks remove the row from cached saved pages directly.
 - **Marking notifications read cancels older list and badge requests before
   patching their caches.** An unfinished initial list restarts after marking
   read; loaded lists keep their pages without a redundant refetch. Otherwise
@@ -402,3 +413,32 @@ the SPA before the application Worker that packages it.
 documents instead.
 The production origin is an explicit public build input and part of Turbo's
 build cache key. The branding build shares this plugin.
+
+## Message attachments
+
+The app shell and messages pane both use the dynamic viewport height. Mixing
+`100vh` on the shell with `100dvh` on the pane creates document scroll when
+mobile browser chrome is visible and detaches the composer from the fixed
+navigation. The navigation reservation includes its border and safe-area inset;
+message lists contain overscroll, while thread headers and composers do not
+shrink. The composer centers a single text line and grows up to its height cap.
+
+`src/components/message-thread.tsx` owns the recipient-scoped composer: up to
+four images, one voice message, or one video, optionally with text. Image
+acceptance/re-encoding, the media picker and Stream upload atoms are shared
+with posts. A selected video blocks sending until upload completes.
+`src/lib/voice-recorder.ts` owns microphone capture, cancellation (including a
+late permission grant), the five-minute limit and track release. Stop during
+pending microphone permission cancels capture and releases any late grant. Preview
+components own and revoke their object URLs.
+
+`src/components/message-attachments.tsx` renders both thread attachments and
+report evidence. Processing videos poll while their thread is open; published
+videos use the existing player. `src/lib/message-preview.ts` supplies consistent
+media-only previews to the inbox and request list. The desktop messages pane
+uses the full viewport width. Verify with the message atom/thread DOM suites,
+voice-recorder tests, moderation case tests, and local browser inspection.
+
+Message history loads directly from the authenticated API on every browser;
+no local identity, initialization gate or email recovery is involved. Message
+text and media-only previews share the ordinary inbox/thread projections.

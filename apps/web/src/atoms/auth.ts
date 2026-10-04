@@ -1,3 +1,4 @@
+import { clearBrowserPush } from "@/lib/browser-push";
 import { atom } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { clearViewerState } from "@/atoms/session-teardown";
@@ -489,6 +490,8 @@ export const signOutAtom = atom(null, async (get, set): Promise<void> => {
     // it the caller navigates while the session store still reports the old
     // user, and `useRedirectWhenSignedIn` bounces them back.
     await waitForSignedOut();
+    // Session deletion already revoked delivery server-side. Browser cleanup is best-effort.
+    await clearBrowserPush().catch(() => undefined);
     // Clears the QueryClient synchronously, then schedules independent
     // best-effort sweeps of the heavier family modules. No lazy chunk can
     // block sign-out completion, while the signed-out UI never sees the old

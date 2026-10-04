@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "@my-tuums/db";
 import { video } from "@my-tuums/db/schema";
+import { canViewMessageMedia } from "./message-media.js";
 import { canViewPostMedia } from "./post-media.js";
 import type { StreamService } from "./stream.js";
 
@@ -26,9 +27,21 @@ const since = (started: number) => Math.round(performance.now() - started);
 
 /**
  * Token issuance and every thumbnail/caption request use the ordinary post
- * authorizer. Direct Stream playback is a bearer capability valid for one hour;
- * subsequent segments do not pass through Access or the application again.
+ * authorizer, falling back to the message-participant authorizer for videos
+ * attached to a private message (issue #408 — those rows have no post, and
+ * their visibility is the conversation's). Direct Stream playback is a bearer
+ * capability valid for one hour; subsequent segments do not pass through
+ * Access or the application again.
  */
+function canViewVideoMedia(
+  db: Database,
+  master: string,
+  viewerId: string | null,
+): Promise<boolean> {
+  return canViewPostMedia(db, master, viewerId).then((allowed) =>
+    allowed ? true : canViewMessageMedia(db, master, viewerId),
+  );
+}
 export async function resolveVideoMedia(
   db: Database,
   stream: Pick<StreamService, "signedVideoUrl" | "readCaptions"> | null,
@@ -48,11 +61,11 @@ export async function resolveVideoMedia(
     .from(video)
     .where(and(eq(video.id, match[1]), eq(video.state, "published")));
   const rowsMs = since(rowsStarted);
-  if (!row?.streamUid || !row.playback || !row.postId) return null;
+  if (!row?.streamUid || !row.playback) return null;
   const prefix = `videos/${row.id}/`;
   const master = `${prefix}master.m3u8`;
   const authorizeStarted = performance.now();
-  const authorized = await canViewPostMedia(db, master, viewerId);
+  const authorized = await canViewVideoMedia(db, master, viewerId);
   const authorizeMs = since(authorizeStarted);
   if (!authorized) return null;
   const name = match[2];
@@ -98,7 +111,7 @@ export async function resolveVideoMedia(
   const providerMs = since(providerStarted);
   // A provider round-trip must not grant a fresh capability after access changed.
   const reauthorizeStarted = performance.now();
-  const reauthorized = await canViewPostMedia(db, master, viewerId);
+  const reauthorized = await canViewVideoMedia(db, master, viewerId);
   const reauthorizeMs = since(reauthorizeStarted);
   observe({
     event: "video_media_timing",

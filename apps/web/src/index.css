@@ -181,13 +181,21 @@
 
 /* Fixed mobile navigation reserves the same space for content, consent, and toasts. */
 .signed-in-shell {
-  --mobile-nav-height: calc(4rem + env(safe-area-inset-bottom));
+  --mobile-nav-height: calc(4rem + 1px + env(safe-area-inset-bottom));
   padding-bottom: var(--mobile-nav-height);
 }
 @media (min-width: 48rem) {
   .signed-in-shell {
     --mobile-nav-height: 0px;
   }
+}
+
+/* The sticky global header publishes its rendered height here at runtime
+   (components/header.tsx) — it is content- and breakpoint-driven, so it is
+   measured, not restated. The fallback holds until the first measurement;
+   sticky sub-headers (the message thread's) pin below the header with it. */
+:root {
+  --header-height: 0px;
 }
 
 /* Signed-out pages have no fixed bottom bar, but under edge-to-edge drawing

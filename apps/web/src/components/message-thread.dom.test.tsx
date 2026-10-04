@@ -1,0 +1,621 @@
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { createStore } from "jotai";
+import { videoDraftAtomFamily } from "@/atoms/video-upload";
+import { useState, type ReactElement } from "react";
+
+const fakeClient = {
+  message: {
+    send: vi.fn(),
+    conversations: vi.fn(),
+    requests: vi.fn(),
+    thread: vi.fn(),
+    unreadCount: vi.fn(),
+    markRead: vi.fn(),
+    accept: vi.fn(),
+    decline: vi.fn(),
+    hide: vi.fn(),
+    deleteMessage: vi.fn(),
+    conversationWith: vi.fn(),
+  },
+};
+
+installTestOrpc(createTanstackQueryUtils(fakeClient));
+
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc, orpc } from "@/lib/orpc";
+import type { MessageItem } from "@/lib/orpc";
+import { messageThreadQueryOptions } from "@/lib/query-definitions";
+import { clearMessageDrafts } from "@/atoms/messages";
+import { reportDialogAtom } from "@/atoms/dialog-targets";
+import { MessageThreadPane, NewMessagePane } from "@/components/message-thread";
+import { renderWithProviders } from "@/test/render";
+import { createTestQueryClient } from "@/test/factories";
+import { m } from "@/paraglide/messages.js";
+import type { QueryClient } from "@tanstack/react-query";
+
+/** The seeded-thread cache shape read back in the first-contact test. */
+type ThreadSeed = {
+  pages: Array<{ items: Array<{ id: string }> }>;
+};
+
+/**
+ * The thread pane's two navigation-adjacent contracts (PR #409 review):
+ * opening a thread acknowledges through the newest DISPLAYED message even
+ * when it is the viewer's own (a reply above an unread incoming message must
+ * still clear it), and switching conversations never carries a draft across
+ * — the route keys the pane by conversation id, which the switcher probe
+ * below mirrors.
+ */
+
+const VIEWER = "viewer-1";
+const OTHER = "user-2";
+
+function pageMessage(overrides: Partial<MessageItem> = {}): MessageItem {
+  return {
+    id: crypto.randomUUID(),
+    senderId: OTHER,
+    body: "text",
+    createdAt: new Date(),
+    deletedAt: null,
+    attachments: [],
+    ...overrides,
+  };
+}
+
+function seedThread(
+  queryClient: QueryClient,
+  conversationId: string,
+  items: MessageItem[],
+  lastReadAt: Date | null,
+  hidden = false,
+  otherUserId = OTHER,
+) {
+  queryClient.setQueryData(orpc.message.thread.key({ input: { conversationId } }), {
+    pages: [
+      {
+        conversationId,
+        lastReadAt,
+        hidden,
+        user: {
+          id: otherUserId,
+          name: "Other Person",
+          username: "other",
+          displayUsername: "Other",
+          image: null,
+        },
+        items,
+        nextCursor: null,
+      },
+    ],
+    pageParams: [undefined],
+  });
+}
+
+/** Renders the pane the way the route does — keyed by conversation id. */
+function ConversationSwitcher() {
+  const [conversationId, setConversationId] = useState("a");
+  return (
+    <div>
+      <button type="button" onClick={() => setConversationId("b")}>
+        switch to b
+      </button>
+      <MessageThreadPane key={conversationId} conversationId={conversationId} />
+    </div>
+  );
+}
+
+function makePane(element: ReactElement) {
+  const queryClient = createTestQueryClient();
+  const render = () => renderWithProviders(element, { signedInAs: { id: VIEWER }, queryClient });
+  return { queryClient, render };
+}
+
+beforeEach(() => {
+  fakeClient.message.markRead.mockReset();
+  fakeClient.message.markRead.mockResolvedValue({ lastReadAt: new Date(), advanced: true });
+  fakeClient.message.thread.mockReset();
+  // Drafts are module state keyed by recipient — start every test clean.
+  clearMessageDrafts();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+it("acknowledges through the newest displayed message even when it is the viewer's own reply", async () => {
+  // The regression: an outgoing newest message skipped the acknowledgment,
+  // leaving the earlier incoming message unread forever — sending never
+  // advances the stored cursor.
+  const incoming = pageMessage({ id: "incoming-unread", createdAt: new Date(100) });
+  const ownReply = pageMessage({ id: "own-newest", senderId: VIEWER, createdAt: new Date(200) });
+  const { queryClient, render } = makePane(<MessageThreadPane conversationId="c-1" />);
+  // Newest first, cursor never set: both rows are unread in principle.
+  seedThread(queryClient, "c-1", [ownReply, incoming], null);
+  fakeClient.message.thread.mockResolvedValue({
+    conversationId: "c-1",
+    lastReadAt: null,
+    user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
+    items: [ownReply, incoming],
+    nextCursor: null,
+  });
+
+  await render();
+
+  await waitFor(() => {
+    expect(fakeClient.message.markRead).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: "c-1", lastSeenMessageId: "own-newest" }),
+      expect.anything(),
+    );
+  });
+});
+
+it("a hidden thread renders its history with the hidden notice above it", async () => {
+  // Re-opening a hidden conversation (the profile's Message action) shows
+  // the shared history, with a banner saying what state the thread is in —
+  // not a history-less "new conversation" composer.
+  const older = pageMessage({
+    id: "history-row",
+    body: "shared history",
+    createdAt: new Date(100),
+  });
+  const { queryClient, render } = makePane(<MessageThreadPane conversationId="c-1" />);
+  seedThread(queryClient, "c-1", [older], null, true);
+  fakeClient.message.thread.mockResolvedValue({
+    conversationId: "c-1",
+    lastReadAt: null,
+    hidden: true,
+    user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
+    items: [older],
+    nextCursor: null,
+  });
+
+  const screen = await render();
+
+  await waitFor(() => expect(screen.getByText("shared history")).toBeVisible());
+  expect(
+    screen.getByText(
+      "You hid this conversation — it is not in your messages. Sending a message brings it back.",
+    ),
+  ).toBeVisible();
+});
+
+it("the thread header menu offers hide and reports the other user", async () => {
+  const user = userEvent.setup();
+  const { queryClient, render } = makePane(<MessageThreadPane conversationId="c-1" />);
+  const now = new Date();
+  seedThread(queryClient, "c-1", [], now);
+  fakeClient.message.thread.mockResolvedValue({
+    conversationId: "c-1",
+    lastReadAt: now,
+    hidden: false,
+    user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
+    items: [],
+    nextCursor: null,
+  });
+
+  const screen = await render();
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "Write a message" })).toBeVisible(),
+  );
+
+  // A lone synchronous click intermittently missed opening the Base UI menu in CI.
+  // Exercise the pointer/focus sequence a user generates before checking its actions.
+  await user.click(screen.getByRole("button", { name: "More" }));
+  const report = await screen.findByRole("menuitem", { name: "Report user" });
+  expect(report).toBeVisible();
+  expect(screen.getByRole("menuitem", { name: "Hide conversation" })).toBeVisible();
+
+  await user.click(report);
+  expect(screen.store.get(reportDialogAtom)).toEqual({ targetType: "user", targetId: OTHER });
+});
+
+it("switching conversations starts from an empty composer — a draft never crosses recipients", async () => {
+  const { queryClient, render } = makePane(<ConversationSwitcher />);
+  const now = new Date();
+  // Distinct recipients: drafts are keyed by recipient (so a draft typed in
+  // one conversation can follow the viewer into that person's thread), and
+  // the switcher must still land on an empty composer for a different one.
+  seedThread(queryClient, "a", [], now, false, "user-a");
+  seedThread(queryClient, "b", [], now, false, "user-b");
+  fakeClient.message.thread.mockImplementation((input: { conversationId: string }) =>
+    Promise.resolve({
+      conversationId: input.conversationId,
+      lastReadAt: now,
+      user: {
+        id: input.conversationId === "a" ? "user-a" : "user-b",
+        name: "Other Person",
+        username: "other",
+        displayUsername: "Other",
+        image: null,
+      },
+      items: [],
+      nextCursor: null,
+    }),
+  );
+
+  const screen = await render();
+  const composer = () => screen.getByRole("textbox", { name: "Write a message" });
+  await waitFor(() => expect(composer()).toBeVisible());
+
+  fireEvent.change(composer(), { target: { value: "meant for A only" } });
+  expect(composer()).toHaveValue("meant for A only");
+
+  // The keyed remount inside the tree — exactly what the route does on a
+  // conversation switch. The new composer starts empty.
+  fireEvent.click(screen.getByRole("button", { name: "switch to b" }));
+  await waitFor(() => expect(composer()).toHaveValue(""));
+});
+
+it("first contact seeds the thread and the draft typed during the move survives it", async () => {
+  // The new-message pane's send: the conversation id arrives with the
+  // message, and the URL moves to the real thread. Two contracts: the
+  // thread's cache is seeded with the sent message (no skeleton
+  // round-trip), and text typed around the remount is still in the
+  // composer when the thread pane mounts.
+  fakeClient.message.conversationWith.mockResolvedValue({
+    conversationId: null,
+    hidden: false,
+    user: {
+      id: OTHER,
+      name: "Other Person",
+      username: "other",
+      displayUsername: "Other",
+      image: null,
+    },
+  });
+  fakeClient.message.unreadCount.mockResolvedValue({ unreadCount: 0, requestCount: 0 });
+  fakeClient.message.send.mockResolvedValue({
+    id: "server-row",
+    conversationId: "c-new",
+    senderId: VIEWER,
+    body: "first contact",
+    createdAt: new Date(),
+  });
+  fakeClient.message.thread.mockResolvedValue({
+    conversationId: "c-new",
+    lastReadAt: null,
+    user: {
+      id: OTHER,
+      name: "Other Person",
+      username: "other",
+      displayUsername: "Other",
+      image: null,
+    },
+    items: [
+      {
+        id: "server-row",
+        senderId: VIEWER,
+        body: "first contact",
+        createdAt: new Date(),
+        deletedAt: null,
+      },
+    ],
+    nextCursor: null,
+  });
+
+  const { queryClient, render } = makePane(<NewMessagePane userId={OTHER} />);
+  const screen = await render();
+  const composer = () => screen.getByRole("textbox", { name: "Write a message" });
+  await waitFor(() => expect(composer()).toBeVisible());
+
+  fireEvent.change(composer(), { target: { value: "first contact" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  await waitFor(() => expect(fakeClient.message.send).toHaveBeenCalled());
+
+  // The sent message is in the destination thread's cache under the exact
+  // key its query mounts with.
+  // SAFETY: the cache was seeded by `seedFirstMessageThread` one await ago —
+  // the ThreadSeed shape is the one that function wrote.
+  const seeded = queryClient.getQueryData(
+    messageThreadQueryOptions("c-new").queryKey,
+  ) as ThreadSeed;
+  expect(seeded.pages[0].items.map((item) => item.id)).toEqual(["server-row"]);
+
+  // The viewer keeps typing while the move happens, then the pane remounts
+  // (what the route change does): the draft is still in the composer.
+  fireEvent.change(composer(), { target: { value: "still typing" } });
+  screen.unmount();
+  const second = await renderWithProviders(
+    <MessageThreadPane key="c-new" conversationId="c-new" />,
+    { signedInAs: { id: VIEWER }, queryClient },
+  );
+  await waitFor(() => expect(second.getByText("first contact")).toBeVisible());
+  expect(second.getByRole("textbox", { name: "Write a message" })).toHaveValue("still typing");
+});
+
+it("renders message media: image thumbnails, a voice player, and the video's processing/failed states", async () => {
+  const { queryClient, render } = makePane(<MessageThreadPane conversationId="c-media" />);
+  seedThread(
+    queryClient,
+    "c-media",
+    [
+      pageMessage({
+        id: "with-image",
+        body: "",
+        createdAt: new Date(100),
+        attachments: [
+          {
+            id: "att-image",
+            kind: "image",
+            url: "/media/messages/m1/a1.png",
+            contentType: "image/png",
+            byteSize: 10,
+            position: 0,
+            width: 2,
+            height: 2,
+            durationMs: null,
+            video: null,
+          },
+        ],
+      }),
+      pageMessage({
+        id: "with-voice",
+        body: "",
+        createdAt: new Date(200),
+        attachments: [
+          {
+            id: "att-voice",
+            kind: "voice",
+            url: "/media/messages/m2/a2.webm",
+            contentType: "audio/webm",
+            byteSize: 10,
+            position: 0,
+            width: null,
+            height: null,
+            durationMs: 42_000,
+            video: null,
+          },
+        ],
+      }),
+      pageMessage({
+        id: "with-processing-video",
+        body: "",
+        createdAt: new Date(300),
+        attachments: [
+          {
+            id: "att-video",
+            kind: "video",
+            url: "/media/videos/v1/master.m3u8",
+            contentType: "application/vnd.apple.mpegurl",
+            byteSize: 10,
+            position: 0,
+            width: null,
+            height: null,
+            durationMs: null,
+            video: {
+              state: "queued",
+              duration: 0,
+              posterUrl: "/media/videos/v1/cover.jpg",
+              previewUrl: "/media/videos/v1/previews.vtt",
+              captionUrl: null,
+              captionLanguage: null,
+            },
+          },
+        ],
+      }),
+    ],
+    new Date(500),
+  );
+  // The pane renders from the FETCHED page — the mock returns the items.
+  fakeClient.message.thread.mockResolvedValue({
+    conversationId: "c-media",
+    lastReadAt: new Date(500),
+    hidden: false,
+    user: {
+      id: OTHER,
+      name: "Other Person",
+      username: "other",
+      displayUsername: "Other",
+      image: null,
+    },
+    items: [
+      pageMessage({
+        id: "with-image",
+        body: "",
+        createdAt: new Date(100),
+        attachments: [
+          {
+            id: "att-image",
+            kind: "image",
+            url: "/media/messages/m1/a1.png",
+            contentType: "image/png",
+            byteSize: 10,
+            position: 0,
+            width: 2,
+            height: 2,
+            durationMs: null,
+            video: null,
+          },
+        ],
+      }),
+      pageMessage({
+        id: "with-voice",
+        body: "",
+        createdAt: new Date(200),
+        attachments: [
+          {
+            id: "att-voice",
+            kind: "voice",
+            url: "/media/messages/m2/a2.webm",
+            contentType: "audio/webm",
+            byteSize: 10,
+            position: 0,
+            width: null,
+            height: null,
+            durationMs: 42_000,
+            video: null,
+          },
+        ],
+      }),
+      pageMessage({
+        id: "with-processing-video",
+        body: "",
+        createdAt: new Date(300),
+        attachments: [
+          {
+            id: "att-video",
+            kind: "video",
+            url: "/media/videos/v1/master.m3u8",
+            contentType: "application/vnd.apple.mpegurl",
+            byteSize: 10,
+            position: 0,
+            width: null,
+            height: null,
+            durationMs: null,
+            video: {
+              state: "queued",
+              duration: 0,
+              posterUrl: "/media/videos/v1/cover.jpg",
+              previewUrl: "/media/videos/v1/previews.vtt",
+              captionUrl: null,
+              captionLanguage: null,
+            },
+          },
+        ],
+      }),
+    ],
+    nextCursor: null,
+  });
+  const screen = await render();
+
+  // The image rides the shared full-size viewer as a lazy thumbnail.
+  const image = await screen.findByRole("img", {
+    name: m.messages_media_image_label({ name: "1" }),
+  });
+  expect(image).toHaveAttribute("src", "/media/messages/m1/a1.png");
+  // The voice note is one self-contained play control with its declared length.
+  expect(screen.getByRole("button", { name: m.messages_voice_play() })).toBeVisible();
+  expect(screen.getByText("0:42")).toBeVisible();
+  // A queued video renders the bounded processing state, never a player.
+  expect(screen.getByText(m.messages_video_processing())).toBeVisible();
+  expect(screen.queryByTitle(m.video_player_label())).toBeNull();
+});
+
+it("renders a failed video attachment as unavailable, not as a player", async () => {
+  const { queryClient, render } = makePane(<MessageThreadPane conversationId="c-failed" />);
+  seedThread(
+    queryClient,
+    "c-failed",
+    [
+      pageMessage({
+        id: "with-failed-video",
+        body: "",
+        createdAt: new Date(100),
+        attachments: [
+          {
+            id: "att-failed",
+            kind: "video",
+            url: "/media/videos/v2/master.m3u8",
+            contentType: "application/vnd.apple.mpegurl",
+            byteSize: 10,
+            position: 0,
+            width: null,
+            height: null,
+            durationMs: null,
+            video: {
+              state: "failed",
+              duration: 0,
+              posterUrl: "/media/videos/v2/cover.jpg",
+              previewUrl: "/media/videos/v2/previews.vtt",
+              captionUrl: null,
+              captionLanguage: null,
+            },
+          },
+        ],
+      }),
+    ],
+    null,
+  );
+  fakeClient.message.thread.mockResolvedValue({
+    conversationId: "c-failed",
+    lastReadAt: null,
+    hidden: false,
+    user: {
+      id: OTHER,
+      name: "Other Person",
+      username: "other",
+      displayUsername: "Other",
+      image: null,
+    },
+    items: [
+      pageMessage({
+        id: "with-failed-video",
+        body: "",
+        createdAt: new Date(100),
+        attachments: [
+          {
+            id: "att-failed",
+            kind: "video",
+            url: "/media/videos/v2/master.m3u8",
+            contentType: "application/vnd.apple.mpegurl",
+            byteSize: 10,
+            position: 0,
+            width: null,
+            height: null,
+            durationMs: null,
+            video: {
+              state: "failed",
+              duration: 0,
+              posterUrl: "/media/videos/v2/cover.jpg",
+              previewUrl: "/media/videos/v2/previews.vtt",
+              captionUrl: null,
+              captionLanguage: null,
+            },
+          },
+        ],
+      }),
+    ],
+    nextCursor: null,
+  });
+  const screen = await render();
+  await waitFor(() => expect(screen.getByText(m.messages_video_failed())).toBeVisible());
+});
+
+it("keeps the caption unsendable until the selected video upload finishes", async () => {
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:video-test");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  const conversationId = "uploading-video";
+  const queryClient = createTestQueryClient();
+  const store = createStore();
+  const draftAtom = videoDraftAtomFamily(`message:${OTHER}`);
+  const draft = {
+    selectionId: "selection",
+    file: new File(["video"], "clip.mp4", { type: "video/mp4" }),
+    videoId: "video-id",
+    status: "uploading" as const,
+    bytes: 0,
+    controller: new AbortController(),
+  };
+  store.set(draftAtom, draft);
+  seedThread(queryClient, conversationId, [], null);
+  fakeClient.message.thread.mockResolvedValue({
+    conversationId,
+    lastReadAt: null,
+    hidden: false,
+    user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
+    items: [],
+    nextCursor: null,
+  });
+  const screen = await renderWithProviders(<MessageThreadPane conversationId={conversationId} />, {
+    store,
+    queryClient,
+    signedInAs: { id: VIEWER },
+  });
+  fireEvent.change(await screen.findByRole("textbox"), { target: { value: "caption" } });
+  expect(screen.getByRole("button", { name: m.messages_send() })).toBeDisabled();
+  act(() => store.set(draftAtom, { ...draft, status: "uploaded" }));
+  expect(screen.getByRole("button", { name: m.messages_send() })).toBeEnabled();
+});

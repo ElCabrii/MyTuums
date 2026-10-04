@@ -1,6 +1,7 @@
 import { test, expect } from "../../support/fixtures";
-import { ALICE } from "../../support/users";
+import { uniqueUser } from "../../support/users";
 import { bookmarkButtonFor, postCardWithText } from "../../support/post-card";
+import { E2E_SERVER_ORIGIN, E2E_WEB_ORIGIN } from "../../constants";
 
 /**
  * The page journey (issue #262): save a post from its permalink, reach
@@ -15,8 +16,16 @@ test.describe("bookmarks", () => {
     page,
     db,
   }) => {
-    const aliceId = await db.getUserId(ALICE.username);
-    const [seeded] = await db.seedPosts(aliceId, 1, {
+    // Each attempt needs an empty saved list, including retries after a failed save journey.
+    const account = uniqueUser("bookmark");
+    const user = await db.createUser(account);
+    await page.context().clearCookies();
+    const login = await page.request.post(`${E2E_SERVER_ORIGIN}/api/auth/sign-in/email`, {
+      headers: { Origin: E2E_WEB_ORIGIN },
+      data: { email: account.email, password: account.password },
+    });
+    expect(login.ok()).toBe(true);
+    const [seeded] = await db.seedPosts(user.id, 1, {
       content: () => `Bookmark target ${Date.now().toString()}`,
     });
     if (!seeded) throw new Error("seedPosts returned no row");
@@ -34,7 +43,7 @@ test.describe("bookmarks", () => {
     // The account menu is the page's one nav entry — the journey goes through
     // it rather than a direct URL, so a broken menu item fails here, not in
     // some other spec that happens to visit /bookmarks.
-    await page.getByTitle(`View profile for ${ALICE.name}`).click();
+    await page.getByTitle(`View profile for ${account.name}`).click();
     await page.getByRole("menuitem", { name: "Bookmarks" }).click();
     await expect(page).toHaveURL(/\/bookmarks$/);
     await expect(postCardWithText(page, seeded.content)).toBeVisible();

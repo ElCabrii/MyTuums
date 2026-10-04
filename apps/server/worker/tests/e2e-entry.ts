@@ -8,8 +8,10 @@ import {
   createJobDispatcher,
 } from "@my-tuums/api/cloudflare-app";
 import { createDistributedRateLimiter } from "@my-tuums/api/distributed-rate-limit";
+import { createMessageNotifier } from "@my-tuums/api/message-events";
 import { createWorkerApplication } from "../application.js";
 import { RateLimitCounter } from "../rate-limit-counter.js";
+import { MessageHub } from "../message-hub.js";
 import {
   E2E_ACCESS_AUDIENCE,
   E2E_ACCESS_ISSUER,
@@ -22,13 +24,14 @@ import {
   E2E_STREAM_TOKEN,
   E2E_STREAM_ORIGIN,
 } from "../../../../e2e/stream-fixture.js";
-export { RateLimitCounter };
+export { RateLimitCounter, MessageHub };
 
 interface Env {
   DB: D1Database;
   MEDIA: R2Bucket;
   IMAGES: ImagesBinding;
   API_COUNTERS: DurableObjectNamespace<RateLimitCounter>;
+  MESSAGE_HUB: DurableObjectNamespace<MessageHub>;
   ASSETS: Fetcher;
   ACCESS_TOKEN: string;
   STREAM: StreamBinding;
@@ -60,6 +63,7 @@ async function application(env: Env) {
       twitch: { clientId: "synthetic-twitch", clientSecret: "synthetic-twitch" },
     },
   });
+  const videoJobs = createJobDispatcher(db, { video: env.VIDEO_WORKFLOW });
   return createWorkerApplication({
     auth,
     services: {
@@ -69,11 +73,9 @@ async function application(env: Env) {
       rateLimiter: createDistributedRateLimiter(env.API_COUNTERS),
       appealToken: createAppealTokenSigner(E2E_AUTH_SECRET),
       emailSender: { send: sendEmail },
-      videoUploads: createVideoUploads(
-        db,
-        stream,
-        createJobDispatcher(db, { video: env.VIDEO_WORKFLOW }),
-      ),
+      messageNotifier: createMessageNotifier(env.MESSAGE_HUB),
+      videoJobs: videoJobs,
+      videoUploads: createVideoUploads(db, stream, videoJobs),
       linkTransport: {
         lookup: () =>
           Promise.reject(new Error("External previews are unavailable in this fixture.")),
@@ -87,6 +89,7 @@ async function application(env: Env) {
     assets: env.ASSETS,
     access: { teamDomain: E2E_ACCESS_ISSUER, audience: E2E_ACCESS_AUDIENCE },
     streamOrigins: [E2E_STREAM_ORIGIN],
+    messageHub: env.MESSAGE_HUB,
   });
 }
 

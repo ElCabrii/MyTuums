@@ -94,9 +94,9 @@ test("video tus recovery keeps explicit submission and durable pending UI (issue
       mimeType: "video/mp4",
       buffer: transportVideo(9 * 1024 * 1024),
     });
-    await expect(
-      page.getByText("Upload complete. Submit your post when you’re ready."),
-    ).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText("Upload complete — ready when you are.")).toBeVisible({
+      timeout: 60_000,
+    });
     expect(interrupted).toBe(true);
     expect(firstPartRequests).toBe(1);
     expect(confirmedOffsets).toEqual([0, 8 * 1024 * 1024]);

@@ -812,3 +812,76 @@ describe("CaseDialog — report snapshots", () => {
     ).toBeInTheDocument();
   });
 });
+
+it("renders every captured image in a message report, including deleted-message evidence", async () => {
+  const id = crypto.randomUUID();
+  const urls = ["/media/messages/reported/one.png", "/media/messages/reported/two.png"];
+  await renderCase(
+    { targetType: "message", targetId: id },
+    {
+      targetType: "message",
+      targetId: id,
+      reports: [],
+      appeals: [],
+      target: {
+        kind: "message",
+        message: {
+          id,
+          conversationId: "conversation",
+          body: "",
+          createdAt: new Date(),
+          deletedAt: new Date(),
+          sender: {
+            id: "sender",
+            name: "Sender",
+            username: "sender",
+            displayUsername: "Sender",
+            image: null,
+          },
+          senderBanned: false,
+          senderBanExpires: null,
+        },
+        sender: {
+          id: "sender",
+          name: "Sender",
+          username: "sender",
+          displayUsername: "Sender",
+          image: null,
+        },
+        senderBanned: false,
+        senderBanExpires: null,
+        evidence: [
+          {
+            reporterId: "recipient",
+            snapshot: {
+              version: 2,
+              reportedMessageId: id,
+              messages: [
+                {
+                  id,
+                  senderId: "sender",
+                  senderHandle: "sender",
+                  body: "",
+                  createdAt: new Date().toISOString(),
+                  attachments: urls.map((url, position) => ({
+                    id: String(position),
+                    kind: "image",
+                    url,
+                    position,
+                    contentType: "image/png",
+                    byteSize: 100,
+                    width: 2,
+                    height: 2,
+                    durationMs: null,
+                    video: null,
+                  })),
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  );
+  expect(screen.getAllByRole("img").map((image) => image.getAttribute("src"))).toEqual(urls);
+});

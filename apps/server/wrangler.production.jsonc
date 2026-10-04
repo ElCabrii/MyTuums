@@ -61,6 +61,7 @@
         "name": "AUTH_COUNTERS",
         "class_name": "AuthRateLimitCounter",
       },
+      { "name": "MESSAGE_HUB", "class_name": "MessageHub" },
     ],
   },
   "migrations": [
@@ -68,6 +69,7 @@
       "tag": "v1",
       "new_sqlite_classes": ["RateLimitCounter", "AuthRateLimitCounter"],
     },
+    { "tag": "v2", "new_sqlite_classes": ["MessageHub"] },
   ],
   "services": [
     {

@@ -1,6 +1,7 @@
 import {
   FOLLOW_PAGE_SIZE,
   GAMES_PAGE_SIZE,
+  MESSAGE_PAGE_SIZE,
   MODERATION_PAGE_SIZE,
   NOTIFICATION_PAGE_SIZE,
   POST_PAGE_SIZE,
@@ -44,7 +45,7 @@ interface PagedNotificationInput {
   cursor?: string;
 }
 
-export type CaseRef = { targetType: "post" | "user"; targetId: string };
+export type CaseRef = { targetType: "post" | "user" | "message"; targetId: string };
 
 export type FollowDirection = "followers" | "following";
 
@@ -406,10 +407,15 @@ export function auditLogQueryOptions() {
 }
 
 export function moderationCaseQueryOptions(ref: CaseRef) {
-  const input: { targetType: "post"; targetId: string } | { targetType: "user"; targetId: string } =
+  const input:
+    | { targetType: "post"; targetId: string }
+    | { targetType: "user"; targetId: string }
+    | { targetType: "message"; targetId: string } =
     ref.targetType === "post"
       ? { targetType: "post", targetId: ref.targetId }
-      : { targetType: "user", targetId: ref.targetId };
+      : ref.targetType === "user"
+        ? { targetType: "user", targetId: ref.targetId }
+        : { targetType: "message", targetId: ref.targetId };
   return {
     ...orpc.moderation.case.queryOptions({ input }),
     retry: retryUnlessClientError,
@@ -419,6 +425,91 @@ export function moderationCaseQueryOptions(ref: CaseRef) {
 export function teamQueryOptions() {
   return {
     ...orpc.moderation.team.queryOptions(),
+    retry: retryUnlessClientError,
+  };
+}
+
+interface PagedMessageInput {
+  limit: number;
+  cursor?: string;
+}
+
+/** The viewer's active conversations, newest activity first (issue #408). */
+export function conversationsQueryOptions() {
+  return {
+    ...orpc.message.conversations.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PagedMessageInput = { limit: MESSAGE_PAGE_SIZE };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
+}
+
+/** Pending message requests — first contact from people the viewer does not follow. */
+export function messageRequestsQueryOptions() {
+  return {
+    ...orpc.message.requests.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PagedMessageInput = { limit: MESSAGE_PAGE_SIZE };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
+}
+
+/** One conversation's messages, newest first — the thread pane's data. */
+export function messageThreadQueryOptions(conversationId: string) {
+  return {
+    ...orpc.message.thread.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PagedMessageInput & { conversationId: string } = {
+          conversationId,
+          limit: MESSAGE_PAGE_SIZE,
+        };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
+}
+
+/**
+ * The messages badge and the requests entry's count. No polling: the badge
+ * moves on the SSE push, on reconnect, and on the focus refetch every other
+ * surface already lives by.
+ */
+export function messagesUnreadQueryOptions() {
+  return {
+    ...orpc.message.unreadCount.queryOptions({ input: {} }),
+    retry: retryUnlessClientError,
+  };
+}
+
+/**
+ * The visible conversation with one user, if any — what the profile "Message"
+ * action resolves before composing a first message.
+ */
+export function conversationWithQueryOptions(userId: string) {
+  return {
+    ...orpc.message.conversationWith.queryOptions({ input: { userId } }),
     retry: retryUnlessClientError,
   };
 }

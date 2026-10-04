@@ -1,9 +1,13 @@
 import type { Database } from "@my-tuums/db";
-import { video, videoSubmission } from "@my-tuums/db/schema";
+import { messageAttachment, video, videoSubmission } from "@my-tuums/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { VIDEO_MAX_DURATION_SECONDS } from "./constants.js";
 import { failStreamVideo } from "./stream-processing.js";
-import { publishStreamVideo, recordStreamReady } from "./stream-publication.js";
+import {
+  publishMessageVideo,
+  publishStreamVideo,
+  recordStreamReady,
+} from "./stream-publication.js";
 import { StreamError, type StreamService } from "./stream.js";
 
 /** The runtime supplies its native stream conversion at the caption boundary. */
@@ -24,19 +28,27 @@ export async function advanceStreamVideo(
 ): Promise<"waiting" | "done"> {
   await failStreamVideo(db, id, true);
   const [work] = await db
-    .select({ state: video.state, uid: video.streamUid, submission: videoSubmission })
+    .select({
+      state: video.state,
+      uid: video.streamUid,
+      submission: videoSubmission,
+      messageAttachmentId: sql<string | null>`(
+        select ${messageAttachment.id} from ${messageAttachment}
+        where ${messageAttachment.videoId} = ${video.id} limit 1)`,
+    })
     .from(video)
-    .innerJoin(videoSubmission, eq(videoSubmission.videoId, video.id))
-    .where(
-      and(
-        eq(video.id, id),
-        eq(video.authorId, videoSubmission.authorId),
-        sql`${video.state} in ('queued', 'processing', 'ready')`,
-      ),
-    );
+    .leftJoin(
+      videoSubmission,
+      and(eq(videoSubmission.videoId, video.id), eq(video.authorId, videoSubmission.authorId)),
+    )
+    .where(and(eq(video.id, id), sql`${video.state} in ('queued', 'processing', 'ready')`));
   if (!work) return "done";
   if (work.state === "ready") {
-    await publishStreamVideo(db, id);
+    // The destination decides the publication shape: a post submission
+    // publishes the post; a message attachment only retires the video's own
+    // processing state (the message row has existed since its send).
+    if (work.submission) await publishStreamVideo(db, id);
+    else await publishMessageVideo(db, id);
     return "done";
   }
   if (!work.uid) {
@@ -61,6 +73,20 @@ export async function advanceStreamVideo(
       status.duration > VIDEO_MAX_DURATION_SECONDS
     ) {
       await failStreamVideo(db, id);
+      return "done";
+    }
+
+    // A message video carries no captions: validate, mark ready, publish —
+    // the message row has existed since its send, so there is nothing else
+    // to do but retire the processing state.
+    if (!work.submission) {
+      await recordStreamReady(db, id, work.uid, {
+        width: status.width,
+        height: status.height,
+        duration: status.duration,
+        captionLanguage: null,
+      });
+      await publishMessageVideo(db, id);
       return "done";
     }
 

@@ -32,6 +32,7 @@ import { makeAppealUrl, type PendingEmail } from "../moderation-actions.js";
 import { moderationEmailContent, renderModerationEmail } from "../moderation-email-content.js";
 import type { Context, EmailSender } from "../context.js";
 import { createLinkFetchTransport } from "../link-card-node.js";
+import type { MessageNotifier, MessagePushEvent } from "../message-events.js";
 import { createRateLimiter, type RateLimiter } from "../rate-limit.js";
 import type { UserRole } from "../roles.js";
 import type { DestructiveStorage, Storage } from "../storage.js";
@@ -87,8 +88,24 @@ export interface TestUser {
  */
 let currentTestRateLimiter = createRateLimiter();
 
+/**
+ * Every message push an integration test's procedures emitted (issue #408):
+ * the recording half of `testMessageNotifier`. Cleared with the limiter so a
+ * test sees only its own events.
+ */
+export const recordedMessageEvents: { userId: string; event: MessagePushEvent }[] = [];
+
+/** Recording push adapter shared by integration-test contexts. */
+export const testMessageNotifier: MessageNotifier = {
+  notify: (userId, event) => {
+    recordedMessageEvents.push({ userId, event });
+    return Promise.resolve();
+  },
+};
+
 beforeEach(() => {
   currentTestRateLimiter = createRateLimiter();
+  recordedMessageEvents.length = 0;
 });
 
 const forwardingRateLimiter: RateLimiter = {
@@ -293,8 +310,10 @@ export async function createTestUser(overrides?: {
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
       videoUploads: null,
+      videoJobs: null,
       linkTransport: defaultTestLinkTransport,
       emailSender: testEmailSender,
+      messageNotifier: testMessageNotifier,
     },
   };
 }
@@ -373,8 +392,10 @@ export async function createPasswordTestUser(): Promise<
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
       videoUploads: null,
+      videoJobs: null,
       linkTransport: defaultTestLinkTransport,
       emailSender: testEmailSender,
+      messageNotifier: testMessageNotifier,
     },
   };
 }
@@ -389,8 +410,10 @@ export const anonContext: Context = {
   rateLimiter: forwardingRateLimiter,
   storage: testStorage,
   videoUploads: null,
+  videoJobs: null,
   linkTransport: defaultTestLinkTransport,
   emailSender: testEmailSender,
+  messageNotifier: testMessageNotifier,
 };
 
 /**
@@ -414,8 +437,10 @@ export function contextFor(
     rateLimiter,
     storage,
     videoUploads: null,
+    videoJobs: null,
     linkTransport: defaultTestLinkTransport,
     emailSender,
+    messageNotifier: testMessageNotifier,
   };
 }
 
@@ -539,8 +564,10 @@ export async function freshSessionFor(testUser: TestUser): Promise<TestUser> {
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
       videoUploads: null,
+      videoJobs: null,
       linkTransport: defaultTestLinkTransport,
       emailSender: testEmailSender,
+      messageNotifier: testMessageNotifier,
     },
   };
 }

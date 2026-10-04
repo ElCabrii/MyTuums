@@ -48,6 +48,21 @@ a delayed alarm checks the stored deadline so it cannot erase a fresh window.
 No counter failure may grant admission. There is no public counter HTTP endpoint
 or reset API.
 
+`message-hub.ts` owns the SQLite-backed `MessageHub` Durable Object — one
+instance per user id (deliberately the raw id, per issue #408's design: the
+name is never exposed cross-user), holding that user's live SSE connections
+for `GET /events/messages` and nothing else. Export it from the HTTP
+entrypoint, bind `MESSAGE_HUB` with its own `new_sqlite_classes` migration
+(tag `v2`), and inject it into API context through `createMessageNotifier`
+from `@my-tuums/api/message-events`. Unlike the counters, the hub holds no
+durable state at all: D1 is the single source of truth, events carry ids
+only, and a failed or missed push loses nothing — clients refetch on
+reconnect and focus. Connections are bounded (three per user, oldest
+evicted), keep-alive runs every 25 seconds, and each stream is closed by the
+server after ten minutes so EventSource reconnects through the route, which
+re-authorizes the session — that bound is the revocation cadence. A failed
+writer drops out of the fan-out set; it must never block the others.
+
 `auth-rate-limit-counter.ts` owns Better Auth's separate inactivity-window counter.
 Each accepted request moves the window; denied attempts never extend it. Its
 atomic `consume` is injected through `createAuthRateLimitStorage` from
@@ -254,3 +269,14 @@ release gate; no browser credentials cross that binding.
 local bindings, password auth and captured mail. It has no hosted configuration
 or Access bypass flag. `../src/development-platform.ts` owns resource persistence
 and jobs bindings; see [local development](../../../docs/operations.md#local-development).
+
+## Message media delivery
+
+The application media authorizer routes `messages/` keys through the message
+participant/report gate. `media.ts` serves allowlisted voice containers as well
+as raster images, with the same authorization before and after storage access
+and private/no-store responses. Voice objects do not derive image variants.
+Video manifests use the existing Stream resolver with message authorization
+as an alternative to post visibility. The application injects `videoJobs` into
+the API so a message send dispatches its committed video-processing intent.
+The native media test covers authorized voice delivery and signed-out refusal.

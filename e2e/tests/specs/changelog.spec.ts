@@ -11,8 +11,9 @@ test("the release popup survives a version bump without obstructing later visits
   const dialog = page.getByRole("dialog", { name: `What's new in v${webPackage.version}` });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("region", { name: "Release notes" })).toContainText(
-    "Welcome to Beta!",
+    `MyTuums ${webPackage.version}`,
   );
+  await expect(page.locator("footer")).toContainText(`v${webPackage.version}`);
   await dialog.getByRole("button", { name: "Got it" }).click();
   await page.reload();
 

@@ -83,6 +83,7 @@ export async function createDevelopmentPlatform(directory: string, port = 3001) 
           exports: {
             RateLimitCounter: { type: "durable-object", storage: "sqlite" },
             AuthRateLimitCounter: { type: "durable-object", storage: "sqlite" },
+            MessageHub: { type: "durable-object", storage: "sqlite" },
           },
           env: {
             DB: database,
@@ -97,6 +98,11 @@ export async function createDevelopmentPlatform(directory: string, port = 3001) 
               type: "durable-object",
               worker: "development-app",
               exportName: "AuthRateLimitCounter",
+            },
+            MESSAGE_HUB: {
+              type: "durable-object",
+              worker: "development-app",
+              exportName: "MessageHub",
             },
             ...workflows,
             LINK_FETCHER: {

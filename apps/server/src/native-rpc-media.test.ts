@@ -91,6 +91,7 @@ it("runs real multipart RPC uploads, D1 visibility, R2 delivery and cleanup in w
             exports: {
               RateLimitCounter: { type: "durable-object", storage: "sqlite" },
               AuthRateLimitCounter: { type: "durable-object", storage: "sqlite" },
+              MessageHub: { type: "durable-object", storage: "sqlite" },
             },
             env: {
               DB: { type: "d1", id: "rpc_media_test" },
@@ -105,6 +106,11 @@ it("runs real multipart RPC uploads, D1 visibility, R2 delivery and cleanup in w
                 type: "durable-object",
                 worker: "rpc-media-test",
                 exportName: "AuthRateLimitCounter",
+              },
+              MESSAGE_HUB: {
+                type: "durable-object",
+                worker: "rpc-media-test",
+                exportName: "MessageHub",
               },
             },
           },

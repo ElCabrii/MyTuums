@@ -263,4 +263,14 @@ export const RATE_LIMITS = {
    * which the per-URL revalidation window already bounds.
    */
   linkCard: { name: "linkCard", limit: 300, windowMs: MINUTE },
+  /**
+   * Sending private messages (issue #408). A conversation is a burst-y,
+   * chat-shaped habit — a live exchange legitimately sends far more per minute
+   * than posting — but it is also the one write whose audience is a single
+   * unwilling recipient, so it needs its own namespace: an unsolicited-DM
+   * sender burning it must not lock themselves (or anyone) out of any other
+   * budget, and no other budget's exhaustion may silence a reply. 60 fits a
+   * brisk two-way exchange while bounding the message-request abuse vector.
+   */
+  messageSend: { name: "messageSend", limit: 60, windowMs: MINUTE },
 } as const satisfies Record<string, RateLimitPolicy>;

@@ -40,8 +40,8 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
 - Email verification and password reset use the configured Cloudflare Email
   Service sender. Delivery failures are logged without recipients or capabilities;
   documented temporary failures receive bounded retries. Password accounts need
-  verification before sign-in. Local tests use synthetic delivery; hosted mail
-  remains to be verified.
+  verification before sign-in. Local tests use synthetic delivery; the
+  production cutover verified delivery to the approved test inbox.
 - Sessions are revoked on password reset, and a revoked session stops
   authenticating immediately — there is no session cookie cache.
 
@@ -264,6 +264,60 @@ menu; the navigation bar has no standalone theme button.
   game hashtag click lands here filtered on that game. Private posts never
   appear here for non-viewers.
 
+## Private messages
+
+One conversation per pair of users, ever — whoever writes first, the thread is
+the same. Anyone signed in can message anyone except themselves and users
+across a block (either direction); private accounts are messageable like
+anyone else. Signing in on a new browser or device immediately restores access
+to message history. Message text is stored by the service and transported over
+HTTPS; there are no browser keys or message-recovery steps.
+
+The `/messages` surface is an app pane, not a document page: it spans the
+full window width on desktop, with the conversation list beside the open
+thread, and it sits out the site footer.
+
+**Message requests** are the anti-spam gate, and deliberately not a per-user
+setting: a first message from someone the recipient does not follow lands as a
+request — listed under Messages → Message requests, ticking no badge — until
+the recipient accepts it, declines it, or simply replies (an implicit accept).
+Accepting moves the conversation to the inbox; declining hides it silently and
+permanently: the sender is never told, their own thread keeps working, and
+messages they keep sending stay invisible to the decliner. The decliner's real
+defense against that is blocking, which refuses sends in both directions.
+
+A message carries text up to 2,000 characters — rendered with the same safe
+linkification as posts — plus at most one media GROUP: up to four images
+(the post images' formats and byte caps, re-encoded by the composer), one
+voice note (up to five recorded minutes; the composer records it through the
+browser's own recorder and the server sniffs the actual container), or one
+video (the same Stream upload the post composer drives, with the same local
+preflight). A media-only message — a photo with no caption — is legal; a
+message with neither text nor media is not. A video message lands
+immediately and renders as processing until Stream finishes; a failed
+processing renders as unavailable in the thread. Reporting a media message
+snapshots the attachment beside the words, and the moderator's view of it is
+gated on that report — media of unreported messages is reachable by the
+conversation's participants only. The sender can delete their own message —
+a tombstone reads "message deleted", and the conversation's order and any
+report evidence survive; the tombstone hides the attachments with the words.
+Each side can hide a conversation from their own list. Hidden is not
+sealed: the profile's Message action re-opens the shared history under a
+banner saying the conversation is hidden, and sending a message is what
+returns it to the inbox.
+
+Unread state is per side: the header mail badge counts unread incoming
+messages in inbox conversations only (requests carry their own count on the
+requests entry), and opening a thread marks it read through the newest
+displayed message. Live delivery rides a server-sent event stream —
+`/events/messages` — that pushes thin refresh notices; a missed push loses
+nothing, and the badge and open thread refetch on reconnect and focus.
+
+Reporting a message works from the thread (tombstones included): the report
+snapshots the message plus up to ten before it, moderators see that snapshot
+with both parties' handles, and every sanction lands on the sender. There is
+deliberately no moderator browse surface for conversations.
+
 ## Notifications
 
 A like on your post, a reply to your post, a repost of your post, a quote of
@@ -323,8 +377,9 @@ Games, and Profile. The header shows the logo image, notifications, and a compac
 moderation icon for authorized roles. Global search sits between the logo and
 notification bell on the same mobile header row. The Profile tab uses the signed-in user’s
 avatar. The own-profile account menu provides settings, bookmarks, theme selection, and
-sign-out; profiles provide a pencil button for customization. Private messages remain hidden until
-implemented. Page content and consent notices clear the bottom navigation and
+sign-out; profiles provide a pencil button for customization. Private messages live behind the
+header's mail action, not a bottom-navigation slot: the four tabs stay as they are. Page content and
+consent notices clear the bottom navigation and
 safe-area inset.
 
 ## Profiles and search
@@ -349,10 +404,10 @@ safe-area inset.
   users, plus up to three games), a full user search, and a full post search.
   User results rank handle-prefix matches ahead of substring matches; game
   results match on name or hashtag key in the catalog's popularity order.
-  Text matching ignores case using locale-independent Unicode simple case rules,
-  retaining accents and literal punctuation. It does not strip accents or expand
-  letters into multiple characters: `É` matches `é`, and `ẞ` matches `ß`, while
-  `e` and `SS` remain different.
+  Text matching folds case and accents using the generated Unicode and
+  PostgreSQL unaccent dictionary. It keeps punctuation literal and expands
+  mapped letters where needed: `ecole` matches `école`, and `STRASSE`
+  matches `straße`.
   Private accounts appear in user search and the typeahead like any other
   account — only their posts are hidden from non-followers.
 
@@ -473,8 +528,8 @@ notification when a badge is earned.
   that already have them, and timeline previews. At most one visible video autoplays, always
   muted; scrolling offscreen pauses it. Autoplay can be disabled in Preferences.
 
-_Configuration-dependent_: uploads require the `S3_*` group. Without it the
-app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
+Images use the environment's private R2 bucket. Local development uses its
+isolated persistent bucket; preview and production each bind their own bucket.
 
 - Accepted types are WebP, PNG and JPEG everywhere, decided by sniffing the
   bytes — never by the declared content type — with per-slot size limits and
@@ -495,14 +550,15 @@ app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
   #207). Clicking an attachment opens it in an in-app full-size viewer — the
   same accessible dialog profile pictures use — rather than navigating to its
   storage URL.
-- Replacing or removing a profile image is atomic: the new objects are
-  written first, the profile's references swap in one locked database step,
-  and only then is the superseded pair deleted. A failed upload or removal
-  never leaves a profile pointing at missing media.
-- Images are stored as relative `/media/<key>` paths and served as a redirect
-  to a short-lived presigned URL. Viewing one requires a session.
+- Replacing or removing a profile image is atomic at the database boundary:
+  the new objects are written first, the profile's references swap in one D1
+  batch, and only then is the superseded pair cleaned up. Failed cleanup is
+  retained for retry.
+- Images are stored as relative `/media/<key>` paths and served through the
+  application Worker after a per-viewer authorization check. Public-post media
+  can be viewed without a session when the post itself is visible signed out.
 - A link preview's lead image lives under `link-cards/<uuid>.<ext>` and is
-  public to every signed-in viewer: it is web content this app mirrored into
+  public to every viewer: it is web content this app mirrored into
   its own bucket, owned by no user, and validated from its bytes before
   storage exactly like an upload.
 
@@ -624,6 +680,31 @@ case rather than creating a second one. _Avoid:_ flag, ticket, complaint.
 another user, in both directions. Not a moderation action. _Avoid:_ mute (a
 different thing), shadowban.
 
+**Message** — one row inside a conversation: text up to 2,000 characters,
+rendered with the same safe linkification as a post, beside at most one media
+group (up to four images, or one voice note, or one video). A sender's
+deletion is a tombstone ("message deleted"), never a row delete, and it hides
+the attachments with the text. Reportable from the thread; reports carry the
+message plus its bounded context (attachments included) to moderation.
+_Avoid:_ DM (the whole feature), chat.
+
+**Voice message** — a recorded audio note sent as a message's single media
+group, up to five recorded minutes. Captured by the composer through the
+browser's recorder; the server sniffs the container and stores the recording
+length as the client's declared measurement, bounded by the byte cap.
+_Avoid:_ audio (generic), memo.
+
+**Conversation** — the single thread two users share, created idempotently by
+the first message and shared whichever of them wrote first. Exactly two
+participants in v1; the schema is participants-shaped so groups can arrive
+without a destructive migration. _Avoid:_ thread (that is the reading view),
+channel.
+
+**Message request** — a first message from someone the recipient does not
+follow, waiting under Message requests until accepted, declined, or answered.
+Never ticks the unread badge; declining is silent and permanent for the
+decliner. _Avoid:_ pending chat, invite.
+
 **Removed post** — a post whose content is hidden by a moderation action while
 the row remains. It renders as a stub, its replies stay visible, and restoring
 it brings the content back. Removal is never a hard delete. _Avoid:_ deleted
@@ -719,10 +800,18 @@ or a moderation action on your content or account. Newest first on
 `/notifications`, unread until the page is opened. One per event, never one
 per retry. Likes, replies, reposts, quotes and follows older than ninety
 days fall out of the page and the badge together; moderation notices are
-kept. _Avoid:_ alert, ping, message (a different thing that does not exist
-yet).
+kept. _Avoid:_ alert, ping, message (a separate private-conversation term).
 
 ## Further reading
 
 - [architecture.md](architecture.md) — how each of these is implemented.
 - [security.md](security.md) — what is public, what is gated, and why.
+
+### Browser notifications
+
+The Notifications page includes a per-browser opt-in for background alerts about
+new inbox activity. Alerts use generic text and open the inbox; signing out revokes
+delivery for that login. Permission and unsupported-browser guidance are localized
+in English and French. Private messages and per-type preferences are outside this
+release. See [browser notifications](browser-notifications.md) for browser requirements
+and delivery limits.

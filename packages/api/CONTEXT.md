@@ -75,10 +75,10 @@ cleanup in that transition's transaction. Post tombstones remove image
 attachments in the tombstone batch. Cleanup debt has no owner foreign key;
 failed storage removals remain retryable. The jobs Worker wires bounded recovery and native R2 operations.
 The native Images/R2 delivery adapter lives in `apps/server/worker/media.ts`;
-HTTP entrypoint integration and the link transport remain to port. The narrow
+the deployed HTTP entrypoint uses it. The narrow
 `@my-tuums/api/image` export shares key and raster validation with that Worker
 without importing the legacy S3/Sharp media resolver. See
-[the migration record](../../docs/cloudflare-migration.md).
+[the Worker context](../../apps/server/worker/CONTEXT.md) for delivery and cache rules.
 
 `src/jobs.ts` records scheduling intent in the source transition's D1 batch.
 Video submission now commits private text, its queued state and a stable
@@ -104,7 +104,7 @@ ownership boundary. The adapter uses bounded responses and content-free errors.
 D1 owner/creator record precedes provider creation. Only the author can obtain
 the tus capability, and upload completion checks authenticated provider status;
 it never submits a post. The browser resumes HEAD/PATCH uploads from Stream's
-confirmed byte offset. Worker entrypoint construction remains to wire.
+confirmed byte offset. The deployed Worker constructs this adapter.
 
 `src/stream-cleanup.ts` expires up to 50 abandoned uploads and handles ten due
 cleanup records per pass. The regenerated baseline and migration 0005 capture provider identity and
@@ -166,7 +166,15 @@ expired/replaced publisher cannot write or publish; missing incumbents or
 changed hashtag identities refuse publication. Favorites and creation times
 remain on stable game rows. Version cleanup removes at most 250 staged rows
 and ten empty versions per pass, excluding active and running versions.
-`upsertGames` is now only a direct integration-fixture helper.
+`upsertGames` is now only a direct integration-fixture helper. `addGameToCatalog`
+(`@my-tuums/api/games-sync`) is the operator command behind `pnpm games:add
+<igdb-id>`: it hydrates one game from IGDB and publishes it through the same
+fenced publisher, staging every incumbent verbatim beside it — a cover download
+failure fails the run (no previous cover to keep), and the added game becomes a
+known id the daily sync refreshes. Its CLI takes IGDB credentials from the
+environment, falling back to exactly the two IGDB keys of the root `.env`
+(`src/igdb-credentials.ts` — the one sanctioned maintenance `.env` read, and
+only those two keys, never the file's database or provider variables).
 
 Game-cover paths include an immutable catalog version. Upload intents protect
 PUTs; publication checks expiry and consumes referenced intents in its batch.
@@ -270,6 +278,7 @@ over HTTP and imports only its browser-safe subpaths.
 | Change how a user is matched by text                                  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`), `src/search-text.ts`                                | all three search surfaces share matching; typeahead and `moderation.searchUsers` share relevance ranking                                                                                                           |
 | Change the IGDB wire rules                                            | `src/igdb.ts` (the client — transport, retry, pacing)                                                      | `src/igdb.test.ts`; the IGDB_* constants in `src/constants.ts`                                                                                                                                                     |
 | Change the catalog sync                                               | `src/games-sync.ts` (stage → validate → covers → one transaction)                                          | `src/games-sync.int.test.ts`; `apps/server/src/games-sync.ts`; `docs/operations.md` Maintenance                                                                                                                    |
+| Add one game by IGDB id (`pnpm games:add`)                            | `src/games-sync.ts` (`addGameToCatalog`) plus `scripts/add-game.ts`                                        | `src/games-sync.int.test.ts`; `docs/operations.md` Maintenance                                                                                                                                                     |
 | Change a game read (page, listing, matcher)                           | `src/games.ts` — the public directory's two procedures, its per-sort keysets and `matchesGameQuery`        | `src/games.int.test.ts`; the typeahead's games half in `src/search.ts` shares the matcher; a new sort needs its cursor-mirroring index in `packages/db/src/schema/app.ts`                                          |
 | Change hashtag-key derivation                                         | `src/games-hashtag.ts` (the only definition; keys are sticky once written)                                 | `src/games-hashtag.test.ts`                                                                                                                                                                                        |
 | Add or change the games fixture                                       | `packages/db/fixtures/games.json` (hand-authored)                                                          | `src/games-fixture.test.ts` pins its contract; the `games:seed` script uploads its covers                                                                                                                          |
@@ -732,20 +741,19 @@ reposter_key)`, where the reposter half is absent for post events and binds
 reposter_key)` — so it hand-rolls the same three parts the skeleton owns
   (row-value cursor filter, +1 lookahead, next-cursor anchored on the last
   returned row) rather than fit a pair-shaped helper.
-- **Presigned URLs are windowed** (`MEDIA_SIGNING_WINDOW_MS`): byte-identical
-  within a window, which is what keeps repeat views off the bucket. Every
-  `/media/` redirect is `private, no-store` — a viewer-authorized decision —
-  except profile display objects, whose redirect is the one stored class:
-  `private`, and bounded by `secondsUntilWindowEnd()` so it can never outlive
-  the signature it points at (`profileDisplayRedirectCacheControl`).
+- **Private media delivery rechecks authorization.** The native Worker checks
+  the viewer before R2 or its internal cache and again before returning image
+  bytes. Variants inherit the base key's authorization. Browser-facing
+  responses are always `private, no-store`; only eligible immutable images
+  use an internal six-hour cache entry. Profile originals stay out of it.
 - **Signed appeal tokens have a 4 KiB input ceiling and a canonical signature.**
   Reject oversized or malformed base64url input before decoding or hashing so
   the one anonymous procedure cannot turn attacker-controlled strings into
   unbounded work.
-- **Bulk deletion trusts only provider-confirmed `Deleted` entries.** An HTTP
-  success may still include per-key S3 failures or omit an acknowledgement;
-  preserve the confirmed count and throw `StorageDeleteError` for every
-  requested key not confirmed as deleted.
+- **Legacy S3 bulk deletion trusts only provider-confirmed `Deleted` entries.**
+  The retained Node adapter must preserve the confirmed count and throw
+  `StorageDeleteError` for each unconfirmed key. The deployed Worker uses
+  `createR2Storage` for maintenance deletion.
 - **D1 owns suspension expiry time.** `suspendUser` returns the
   `banExpires` value from the update and uses that exact timestamp in both the
   response and notification; do not calculate a second application-clock
@@ -797,14 +805,16 @@ reposter_key)` — so it hand-rolls the same three parts the skeleton owns
 
 - `Context.session` comes from `@my-tuums/auth`; `db` and the schema from
   `@my-tuums/db`. `apps/server` mounts `appRouter` at `/rpc` and serves
-  `/media` through `createMediaResolver`.
-- `src/media.ts` is a pure key-to-URL function with no session logic of its
-  own — the server hands it the viewer (possibly null, for the public
-  permalink) and every authorization decision lives in the authorizers.
-- `src/media-variants.ts` owns on-demand image variants (sharp); the widths
-  and key shapes live in `src/constants.ts` (`MEDIA_VARIANT_WIDTHS`,
-  `mediaVariantKey`) so the browser's `srcset` and the server's generator
-  share one definition. `src/public-post-head.ts` is the one-query unfurl
+  `/media` through `createWorkerMediaResolver`.
+- `src/media.ts` retains the legacy S3 redirect resolver. The deployed Worker
+  composes `canViewPostMedia`, `canViewProfileMedia`, `canViewLinkCardMedia`
+  and `canViewGameCoverMedia` from this package, including null-viewer rules
+  for public content. It checks authorization before R2 or cache access and
+  again before delivery.
+- `apps/server/worker/media.ts` owns on-demand image variants through
+  Cloudflare Images. The widths and key shapes live in `src/constants.ts`
+  (`MEDIA_VARIANT_WIDTHS`, `mediaVariantKey`) so the browser's `srcset` and
+  the Worker share one definition. `src/public-post-head.ts` is the one-query unfurl
   head `apps/server`'s static handler renders.
 
 ## Verification
@@ -838,3 +848,30 @@ throughout on purpose.
 - [docs/architecture.md](../../docs/architecture.md) — context, media and moderation flows.
 - [docs/security.md](../../docs/security.md) — the anonymous surface, rate-limit keys, privacy projection.
 - [docs/product.md](../../docs/product.md) — the vocabulary these procedures implement.
+
+## Private message media
+
+`src/messages.ts` accepts text with at most one attachment group: up to four
+images, one voice message, or one already-uploaded Stream video. Media-only
+messages are valid. `src/message-media.ts` owns validation, attachment
+projection and participant/report authorization; image limits reuse post rules.
+Voice bytes are capped at 10 MB and container-sniffed; duration is a bounded
+client measurement, not a server-verified playback length.
+
+Image/voice writes register an upload intent before R2 I/O and require that
+intent to remain live in the guarded send batch. Video availability guards the
+conversation and participant writes too, so a refused send cannot create a
+request or reactivate a hidden conversation. Video queueing and its job
+intent commit with the message. Stream publication for a message sets the
+video's published state without creating a post. A failed video's row can be
+retired while its message attachment remains as an unavailable placeholder.
+
+Report snapshots v2 retain every attachment in the bounded context window; v1
+text snapshots remain readable. Moderator media authorization matches exact
+paths captured in submitted reports, including context, without granting access
+to the rest of the conversation. The case reader refreshes captured videos'
+processing metadata. Sender tombstones hide media from participants but retain
+it for reporting; account deletion can retire the underlying storage.
+`readMediaReferences` includes message attachments and reconciliation scans the
+`messages/` prefix. Verify through messages, Stream-job, video-media and
+message-migration integration tests, plus message-media unit tests.

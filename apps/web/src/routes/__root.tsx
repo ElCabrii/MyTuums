@@ -1,4 +1,4 @@
-import { createRootRoute, HeadContent, Outlet } from "@tanstack/react-router";
+import { createRootRoute, HeadContent, Outlet, useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useAtomValue } from "jotai";
 import { GlobalDialogs } from "@/components/global-dialogs";
@@ -13,6 +13,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { resolvedThemeAtom, themeClassEffect } from "@/atoms/theme";
 import { localeDocumentEffect, localePreferenceEffect } from "@/atoms/locale";
 import { isSignedInAtom, sessionSettledAtom, sessionSettledEffect } from "@/atoms/session";
+import { useMessageEvents } from "@/hooks/use-message-events";
 import { useRequireHandle } from "@/hooks/use-require-handle";
 import { useRequireSignedIn } from "@/hooks/use-require-signed-in";
 import { fallbackHead } from "@/lib/document-head";
@@ -60,12 +61,21 @@ function RootLayout() {
   // to /login with their destination preserved in ?redirect=.
   useRequireSignedIn();
 
+  // The private-message event stream, mounted app-wide like the gates: the
+  // badge lives in the header, not on /messages, so the subscription must
+  // outlive any one route. Opens only once the protected product is ready
+  // and closes when the signed-in tree unmounts (sign-out included).
+  useMessageEvents();
+
   // All reads live above the splash branch below — a hook called after a
   // conditional return would be a rules-of-hooks violation the moment the
   // splash unmounts.
   const settled = useAtomValue(sessionSettledAtom);
   const signedIn = useAtomValue(isSignedInAtom);
   const resolvedTheme = useAtomValue(resolvedThemeAtom);
+  const isMessagesTree = useRouterState({ select: (state) => state.location.pathname }).startsWith(
+    "/messages",
+  );
 
   // While the first /get-session is in flight this renders nothing: the
   // splash is static markup in index.html (`#app-splash`), already painted
@@ -83,7 +93,7 @@ function RootLayout() {
     <>
       <HeadContent />
       <div
-        className={`bg-background text-foreground flex min-h-screen flex-col antialiased ${signedIn ? "signed-in-shell" : "signed-out-shell"}`}
+        className={`bg-background text-foreground flex min-h-dvh flex-col antialiased ${signedIn ? "signed-in-shell" : "signed-out-shell"}`}
         // React capture also covers media in portaled full-size viewers.
         onDragStartCapture={(event) => {
           if (event.target instanceof Element && event.target.closest("img, video, audio")) {
@@ -95,7 +105,10 @@ function RootLayout() {
         <main className="flex-1">
           <Outlet />
         </main>
-        <Footer />
+        {/* The messages tree is a fixed-height app surface (its list and
+            thread scroll inside their own panes); the footer would push it
+            past the viewport and reintroduce page scroll. */}
+        {!isMessagesTree && <Footer />}
         {signedIn && <MobileNavigation />}
         <GlobalDialogs />
         {/* Mounted unconditionally: the dialog owns the whole decision — signed

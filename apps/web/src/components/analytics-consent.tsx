@@ -55,6 +55,9 @@ function ConfiguredAnalyticsConsent({ analytics }: { analytics: AnalyticsAdapter
       .start()
       .then(() => {
         if (!current) return;
+        // Messaging paths contain conversation or recipient IDs. Consent to
+        // analytics must not disclose private correspondence metadata.
+        if (pathname === "/messages" || pathname.startsWith("/messages/")) return;
         // Capability tokens live in the query string (`/reset-password`,
         // `/appeal`), so only the origin and pathname ever leave the device.
         // `searchStr` is still a dependency below so query-only navigations

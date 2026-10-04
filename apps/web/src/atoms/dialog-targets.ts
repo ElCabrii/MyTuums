@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import type { Post } from "@/lib/orpc";
+import type { MessageAttachment, Post } from "@/lib/orpc";
 
 // Keep dialog identities free of runtime mutation and UI imports: the root
 // observes them before any dialog implementation has been requested.
@@ -9,10 +9,19 @@ import type { Post } from "@/lib/orpc";
  * itself — already loaded in the feed cache when the kebab opened the dialog
  * — so the dialog can preview what is being flagged without a second fetch,
  * and without a fetch race against a post being removed between the card and
- * the dialog. A user report carries no post; there is nothing to preview.
+ * the dialog. A user report carries no post; there is nothing to preview. A
+ * message report carries the row's text as it rendered (null on the sender's
+ * tombstone — the report still files from the retained snapshot).
  */
 export type ReportDialogTarget =
-  { targetType: "post"; targetId: string; post: Post } | { targetType: "user"; targetId: string };
+  | { targetType: "post"; targetId: string; post: Post }
+  | { targetType: "user"; targetId: string }
+  | {
+      targetType: "message";
+      targetId: string;
+      body: string | null;
+      attachments?: MessageAttachment[];
+    };
 
 /** Which report dialog is open: the target being reported, or null. */
 export const reportDialogAtom = atom<ReportDialogTarget | null>(null);

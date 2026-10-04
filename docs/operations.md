@@ -183,8 +183,10 @@ jobs receive the Cloudflare token after those checks pass; verification jobs do
 not receive deployment credentials.
 
 Before a hosted release, the deploy command confirms all three required checks
-passed on the exact clean `main` commit. Branch pushes do not create additional
-Cloudflare environments or automatic deployments.
+passed on the exact clean commit. If newer checks for that commit are queued or
+running, it waits up to thirty minutes before any build, migration or deployment.
+Failed or cancelled checks still stop deployment. Eligible pushes to `main` deploy production;
+eligible pushes to `release/**` deploy preview. Other branches do not deploy.
 
 ## Maintenance
 
@@ -196,17 +198,25 @@ pnpm db:promote <username> <moderator|staff|admin>
 pnpm db:grant:founder <username>
 pnpm games:seed
 pnpm games:sync
+pnpm games:add 55220
 pnpm --filter @my-tuums/api reconcile:media
 pnpm --filter @my-tuums/api prune:notifications --retention-days=90
 
 pnpm games:sync --remote --environment=preview
 pnpm games:sync --remote --environment=production
+pnpm games:add 55220 --remote --environment=production
 pnpm --filter @my-tuums/api reconcile:media --remote --environment=preview
 pnpm --filter @my-tuums/api prune:notifications --retention-days=90 --apply --remote --environment=production
 ```
 
 `games:sync` records an intent; the selected jobs Worker's scheduled recovery
-dispatches it. `reconcile:media` always binds the selected database and its
+dispatches it. `games:add <igdb-id>` publishes one game immediately through the
+same fenced publisher (it hydrates from IGDB, so `IGDB_CLIENT_ID` and
+`IGDB_CLIENT_SECRET` must be set in the environment — the command falls back to
+exactly those two keys of the root `.env`, and never loads anything else from
+that file), and the added game then becomes a known id the daily sync keeps
+refreshing.
+`reconcile:media` always binds the selected database and its
 matching private bucket. Notification pruning is a dry run unless `--apply` is
 present. Promotion remains bootstrap-only after the first admin exists, and
 founder grants enforce the three-holder cap atomically.
@@ -215,3 +225,20 @@ Retain exports and recovery artifacts outside the repository because they can
 contain sessions and verification capabilities. D1 recovery does not restore
 R2 objects, Stream videos, Workflow history or Durable Object state; coordinate
 those systems before allowing writes to a restored database.
+
+## Browser push delivery
+
+Browser notifications use the existing minute maintenance Workflow and session-bound
+D1 subscriptions. Configure the environment's VAPID secrets before enabling the
+feature; see [browser notification operations](browser-notifications.md#configuration-and-rollout)
+for generation, rollout order, retries and hosted-device verification.
+
+## Messaging rollback before 0.6.0
+
+Apply migrations 0015/0016 through the normal pre-deploy workflow. They discard
+unreleased encrypted test messages and keys, preserve plaintext history, and
+queue attachment cleanup through the existing triggers. The matching Worker
+and SPA send and read plain message text over HTTPS. The earlier encryption
+Worker cannot run against this schema; roll forward with the matching build.
+`MESSAGE_RECOVERY_KEYRING` is unused and can be removed from hosted environments
+after deployment. No messaging secret is needed for new environments.

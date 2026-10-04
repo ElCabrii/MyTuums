@@ -3,6 +3,7 @@ import { atomFamily } from "jotai-family";
 import { atomWithMutation, queryClientAtom } from "jotai-tanstack-query";
 import { store } from "@/lib/store";
 import { orpc } from "@/lib/orpc";
+import { postListQueryOptions } from "@/lib/query-definitions";
 import {
   beginPostPatch,
   readCachedPost,
@@ -46,8 +47,7 @@ const SNAPSHOT_SCOPE: PostSnapshotScope = "bookmark";
  * post, intent-tracked reconciliation), and for the same reasons documented
  * there. The one difference the response shape forces: a like reconciles the
  * public count from the response, while a bookmark is private state with no
- * count, so success merely confirms the flag the optimistic patch already
- * set.
+ * count, so success confirms the flag and updates the saved list.
  */
 function toggleMutationAtom(postId: string, direction: "bookmark" | "unbookmark") {
   // Explicit type parameters: the options are built by spreading oRPC's
@@ -103,6 +103,12 @@ function toggleMutationAtom(postId: string, direction: "bookmark" | "unbookmark"
         }));
         if (result.viewerHasBookmarked === false) {
           removePostFromBookmarksFeed(queryClient, result.postId);
+        } else {
+          // Navigation can load the saved list before this write completes.
+          // Cancel even an unfinished first read, then fetch the server's ordering.
+          const queryKey = postListQueryOptions({ feed: "bookmarks" }).queryKey;
+          void queryClient.cancelQueries({ queryKey });
+          void queryClient.invalidateQueries({ queryKey });
         }
       },
 

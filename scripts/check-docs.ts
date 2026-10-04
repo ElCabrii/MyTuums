@@ -206,6 +206,7 @@ const SKIP_DIRS = new Set([
   "node_modules",
   ".git",
   ".claude",
+  ".zcode",
   "dist",
   ".turbo",
   "paraglide",

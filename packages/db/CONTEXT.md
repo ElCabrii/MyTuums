@@ -14,13 +14,14 @@ both `--remote` and an explicit environment, validate their exact app/D1/R2
 tuple, and load no `.env` or unrelated app bindings. Media commands cannot
 combine one environment's bucket with another database.
 The PostgreSQL config, direct schema-push/Studio commands and test-URL helpers
-have been removed on this branch. Use committed native migrations.
+were removed during the native migration. Use committed D1 migrations.
 `scripts/rehearse-recovery.ts` owns the local SQL recovery rehearsal. It creates
 two fresh `_test` databases, exports/imports through the installed Wrangler CLI,
 compares schema/data and exercises restored triggers. It accepts no target or
 remote option, loads no environment files and removes its own temporary files.
 It does not open the application's local or hosted resources.
-See [migration status](../../docs/cloudflare-migration.md). The map below records native ownership and invariants.
+See [operations](../../docs/operations.md#migrations) for the active migration
+workflow. The map below records native ownership and invariants.
 
 The native migration baseline is `drizzle-d1/0000_cloudflare_initial.sql`;
 `0001_database_invariants.sql` owns handle normalization, the two expression
@@ -43,11 +44,10 @@ Workflow intents and Stream state. The remaining migrations are custom SQL:
 `0004_game_cover_cleanup.sql` for catalog covers, and
 `0005_stream_cleanup_triggers.sql` for video termination/orphan cleanup.
 The previous experimental migration sequence was never applied remotely. The
-current seven migrations, through `0006_durable_moderation_email.sql`, were applied
-to the original isolated migration database on September 11 from commit
-`9078e60`. All 114 schema objects and ledger hashes matched local migration
-output before the preview and production cutovers. Evolve this deployed
-baseline with new committed migrations; never regenerate or reset it.
+original seven migrations, through `0006_durable_moderation_email.sql`, were
+validated before the preview and production cutovers. The current history also
+includes `0007_private_messages.sql`. Evolve the deployed baseline with new
+committed migrations; never regenerate or reset it.
 Historical PostgreSQL migrations under `drizzle/` remain unchanged.
 
 Video rows require a creator identity and retain a private upload capability,
@@ -62,7 +62,8 @@ creator lookup target; retirement of terminal rows must not recreate cleanup.
 Publication's D1 batch first latches author/target/deadline eligibility. Its
 intermediate published state has no post ID until the same batch inserts the
 post and effects and attaches its ID; no caller can observe that intermediate
-state. A committed published row with no post ID is an orphan, never playable.
+state. A committed published row without a post ID is playable only when referenced
+by a message attachment; otherwise it is an orphan.
 Failure commits its notification, pending-text erasure and cleanup together.
 Provider operations always happen outside the database transaction.
 
@@ -78,8 +79,8 @@ Dispatch acknowledgement proves instance creation, not completion.
 
 The D1 + Drizzle data layer: explicit binding-based database construction,
 hand-written app tables, generated Better Auth tables, committed migrations and
-ephemeral local workerd test databases. It serves data only — no HTTP. Legacy
-administrative scripts and deployment callers still require their runtime port.
+ephemeral local workerd test databases. It serves data only — no HTTP. Native
+maintenance and deployment CLIs use guarded D1/R2 environment selection.
 
 ## Start here
 
@@ -92,16 +93,16 @@ administrative scripts and deployment callers still require their runtime port.
 
 ## Change map
 
-| Intent                                     | Primary                                                          | Also touch                                                                                                                                       |
-| ------------------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Add or change an app table                 | `src/schema/app.ts`                                              | `pnpm db:generate`, then commit `drizzle-d1/`; an index if a cursor reads it                                                                     |
-| Change an auth table                       | `packages/auth/src/index.ts`                                     | `pnpm --filter @my-tuums/db db:generate:auth`, then `pnpm db:generate`                                                                           |
-| Add an index for a new list                | `src/schema/app.ts`                                              | the `keysetPage` call in `packages/api` it must mirror                                                                                           |
-| Add or change a ranked-feed snapshot field | `src/schema/app.ts` (`feedRankSnapshot`, `FeedRankSnapshotItem`) | migration `0035_charming_sandman`; `packages/api/src/feed-rank.ts` (the only reader/writer); `docs/operations.md` Migrations                     |
-| Change how migrations are applied          | `src/migrate.ts`                                                 | `scripts/migrate.ts`, `../../apps/server/wrangler.jsonc`                                                                                         |
-| Change test-database handling              | `src/testing/d1.ts`                                              | `scripts/setup-test-db.ts`, `e2e/global-setup.ts`                                                                                                |
-| Add a maintenance script                   | `scripts/`                                                       | the `scripts` entry in `package.json`                                                                                                            |
-| Edit the games fixture                     | `fixtures/games.json`                                            | hand-authored seed data (never generated); `packages/api`'s `games-fixture.test.ts` pins its contract, and its seeder uploads `fixtures/covers/` |
+| Intent                                     | Primary                                                          | Also touch                                                                                                                                                                                                                   |
+| ------------------------------------------ | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add or change an app table                 | `src/schema/app.ts`                                              | `pnpm db:generate`, then commit `drizzle-d1/`; an index if a cursor reads it                                                                                                                                                 |
+| Change an auth table                       | `packages/auth/src/index.ts`                                     | `pnpm --filter @my-tuums/db db:generate:auth`, then `pnpm db:generate`                                                                                                                                                       |
+| Add an index for a new list                | `src/schema/app.ts`                                              | the `keysetPage` call in `packages/api` it must mirror; the message lists scope through `conversation_participant_user_idx` and sort the bounded result — `conversation` deliberately carries no ordering index (issue #408) |
+| Add or change a ranked-feed snapshot field | `src/schema/app.ts` (`feedRankSnapshot`, `FeedRankSnapshotItem`) | generate a new D1 migration; update `packages/api/src/feed-rank.ts` (the only reader/writer)                                                                                                                                 |
+| Change how migrations are applied          | `src/migrate.ts`                                                 | `scripts/migrate.ts`, `../../apps/server/wrangler.jsonc`                                                                                                                                                                     |
+| Change test-database handling              | `src/testing/d1.ts`                                              | `scripts/setup-test-db.ts`, `e2e/global-setup.ts`                                                                                                                                                                            |
+| Add a maintenance script                   | `scripts/`                                                       | the `scripts` entry in `package.json`                                                                                                                                                                                        |
+| Edit the games fixture                     | `fixtures/games.json`                                            | hand-authored seed data (never generated); `packages/api`'s `games-fixture.test.ts` pins its contract, and its seeder uploads `fixtures/covers/`                                                                             |
 
 ## Invariants
 
@@ -147,8 +148,8 @@ administrative scripts and deployment callers still require their runtime port.
   insert/update normalization triggers; auth hooks and direct writes share
   the same lowercase database boundary.
 - **Test execution has no remote connection path.** `src/testing/d1.ts`
-  applies committed migrations to an ephemeral binding. Legacy URL-based
-  administrative helpers remain guarded and must be ported before use.
+  applies committed migrations to an ephemeral binding. Maintenance CLIs
+  require explicit `--remote --environment=preview|production` for hosted data.
 - **A rank snapshot is viewer-owned, scope-bound, and content-free (issue
   #305).** `feedRankSnapshot` holds ordered IDs with repost attribution
   (`FeedRankSnapshotItem[]`), never post text; the scope check constraint pins
@@ -221,7 +222,9 @@ from `apps/server/wrangler.preview.jsonc`; the default remains local. Never use 
 snapshot importer against an environment that is accepting writes.
 
 `deploy:preview` gates a clean allowed branch against the exact commit’s latest
-GitHub Actions Verify, E2E tests and Docker image builds results. Production
+GitHub Actions Verify, E2E tests and Docker image builds results. It
+waits up to thirty minutes for newer pending checks on that commit; failed,
+cancelled, missing or foreign checks still refuse deployment immediately. Production
 requires `main`; preview requires `release/**`. Retired migration targets and
 all other branches are refused. It then builds and
 deploys migrations, the private link fetcher, jobs and app in order; production
@@ -241,3 +244,25 @@ offline converter with the production Railway environment UUID and
 The command name remains compatible with the completed preview migration.
 See [production execution](../../docs/cloudflare-production-migration.md) for
 resource identities, backups and cutover gates.
+
+## Message media migrations
+
+`0008_message_media.sql` adds `message_attachment` and permits empty message
+bodies; the send procedure enforces text-or-media across the two tables.
+`0009_special_shiva.sql` adds unique media-path/video indexes and changes the
+video foreign key to SET NULL so failed-video cleanup preserves the message.
+`0010_message_media_cleanup.sql` records image/voice and video cleanup on hard
+attachment deletion, including account cascades. Message tombstones retain
+attachments for reports. The Stream cleanup trigger distinguishes a lost post
+reference from a published message video, which legitimately has no post ID.
+Preserve these custom triggers when rebuilding attachment or video tables.
+
+## Message encryption rollback
+
+Migrations 0015/0016 retire the unreleased encryption feature without rewriting
+the migration history. Encrypted preview/test messages are deleted through the
+existing attachment cleanup triggers; plaintext messages, report evidence and
+participant state for retained conversations survive. Encryption-only threads
+are removed and mixed threads regain their last plaintext message timestamp.
+The key/recovery tables and envelope column are dropped; message bodies remain
+immutable. Apply these migrations before deploying the matching Worker/SPA.

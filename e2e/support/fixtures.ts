@@ -96,4 +96,24 @@ export const test = base.extend<Fixtures, { platformLifetime: void }>({
   ],
 });
 
+/**
+ * A fresh page signed in as `name`, seeded exactly like the fixture-built
+ * pages (release notes seen, analytics refused outside the analytics
+ * project) — for multi-session scenarios where the SAME account needs a
+ * second live session beyond the per-user fixture pages.
+ */
+export async function openSessionAs(
+  browser: import("@playwright/test").Browser,
+  name: "alice" | "bob",
+  testInfo: { project: { name: string } },
+  showReleaseNotes = false,
+): Promise<Page> {
+  const context = await browser.newContext({ storageState: E2E.storageStateFor(name) });
+  if (!showReleaseNotes) await seedSeenReleaseNotes(context);
+  if (testInfo.project.name !== "analytics") await seedAnalyticsRefusal(context);
+  const page = await context.newPage();
+  page.on("close", () => void context.close());
+  return page;
+}
+
 export { expect } from "@playwright/test";

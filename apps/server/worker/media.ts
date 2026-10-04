@@ -1,5 +1,20 @@
-import { parseMediaVariantKey, RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
+import {
+  parseMediaVariantKey,
+  RPC_MAX_BODY_BYTES,
+  SERVED_AUDIO_TYPES,
+} from "@my-tuums/api/constants";
 import { isAllowedImageType, isSafeObjectKey } from "@my-tuums/api/image";
+
+/**
+ * What this route may stream back byte-for-byte: the image types (which also
+ * feed the variant generator) plus the voice-note audio containers (issue
+ * #408) — audio never derives variants and is served exactly as stored. The
+ * list is closed; a new stored format extends it in constants together with
+ * the upload validator.
+ */
+function isDeliverableContentType(contentType: string): boolean {
+  return isAllowedImageType(contentType) || SERVED_AUDIO_TYPES.some((type) => type === contentType);
+}
 
 /** Schedules background work on the request's execution context (issue #405). */
 export type WaitUntil = (promise: Promise<unknown>) => void;
@@ -194,7 +209,7 @@ export function createWorkerMediaResolver(deps: MediaDependencies) {
         // A block, ban, replacement or deletion during cache lookup must take
         // effect before cached bytes are delivered — the same second
         // authorization the R2 path applies after its I/O.
-        if (isAllowedImageType(contentType) && Number.isSafeInteger(length) && length >= 0) {
+        if (isDeliverableContentType(contentType) && Number.isSafeInteger(length) && length >= 0) {
           if (!(await deps.authorize(baseKey, viewerId))) {
             await cached.body.cancel().catch(() => {});
             return null;
@@ -225,7 +240,7 @@ export function createWorkerMediaResolver(deps: MediaDependencies) {
     let delivered = false;
     try {
       const contentType = object.httpMetadata?.contentType;
-      if (!contentType || !isAllowedImageType(contentType)) return null;
+      if (!contentType || !isDeliverableContentType(contentType)) return null;
       // A block, ban, replacement or deletion during R2/Images I/O must take
       // effect before we issue the response, including already-cached variants.
       if (!(await deps.authorize(baseKey, viewerId))) return null;

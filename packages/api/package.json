@@ -72,6 +72,10 @@
       "types": "./src/distributed-rate-limit.ts",
       "default": "./src/distributed-rate-limit.ts"
     },
+    "./message-events": {
+      "types": "./src/message-events.ts",
+      "default": "./src/message-events.ts"
+    },
     "./cloudflare-app": {
       "types": "./src/cloudflare-app.ts",
       "default": "./src/cloudflare-app.ts"
@@ -86,6 +90,7 @@
     "reconcile:media": "tsx scripts/reconcile-media.ts",
     "prune:notifications": "tsx scripts/prune-notifications.ts",
     "games:seed": "tsx scripts/seed-games.ts",
+    "games:add": "tsx scripts/add-game.ts",
     "generate:case-folding": "tsx scripts/generate-case-folding.ts",
     "generate:search-folding": "tsx scripts/generate-search-folding.ts"
   },

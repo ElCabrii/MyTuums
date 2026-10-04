@@ -50,6 +50,76 @@
       "when": 1789122317474,
       "tag": "0006_durable_moderation_email",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1789500232964,
+      "tag": "0007_private_messages",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1789654048517,
+      "tag": "0008_message_media",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1789900732094,
+      "tag": "0009_special_shiva",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1789901186706,
+      "tag": "0010_message_media_cleanup",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1790113989950,
+      "tag": "0011_recoverable_message_encryption",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1790113998369,
+      "tag": "0012_encrypted_message_writes",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1790596055290,
+      "tag": "0013_browser_push",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1790596180793,
+      "tag": "0014_push_delivery_trigger",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1790984992001,
+      "tag": "0015_remove_message_encryption_guards",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1790985011100,
+      "tag": "0016_remove_message_encryption",
+      "breakpoints": true
     }
   ]
 }

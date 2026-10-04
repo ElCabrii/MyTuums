@@ -24,15 +24,15 @@ export function MobileNavigation() {
           activeProps={activeProps}
           className={itemClassName}
         >
-          <Home className="size-5" />
+          <Home className="h-6 w-5" />
           {m.nav_home()}
         </Link>
         <Link to="/discover" activeProps={activeProps} className={itemClassName}>
-          <Compass className="size-5" />
+          <Compass className="h-6 w-5" />
           {m.nav_discover()}
         </Link>
         <Link to="/games" activeProps={activeProps} className={itemClassName}>
-          <Gamepad2 className="size-5" />
+          <Gamepad2 className="h-6 w-5" />
           {m.nav_games()}
         </Link>
         {handle ? (
@@ -42,14 +42,14 @@ export function MobileNavigation() {
             activeProps={activeProps}
             className={itemClassName}
           >
-            <span aria-hidden="true">
+            <span aria-hidden="true" className="flex h-6 items-center">
               <UserAvatar user={user} alt="" className="size-6" fallbackClassName="text-[10px]" />
             </span>
             {m.nav_profile()}
           </Link>
         ) : (
           <Link to="/welcome" activeProps={activeProps} className={itemClassName}>
-            <span aria-hidden="true">
+            <span aria-hidden="true" className="flex h-6 items-center">
               <UserAvatar user={user} alt="" className="size-6" fallbackClassName="text-[10px]" />
             </span>
             {m.nav_profile()}

@@ -1,0 +1,464 @@
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
+const fakeClient = {
+  message: {
+    send: vi.fn(),
+    conversations: vi.fn(),
+    requests: vi.fn(),
+    thread: vi.fn(),
+    unreadCount: vi.fn(),
+    markRead: vi.fn(),
+    accept: vi.fn(),
+    decline: vi.fn(),
+    hide: vi.fn(),
+    deleteMessage: vi.fn(),
+    conversationWith: vi.fn(),
+  },
+};
+
+installTestOrpc(createTanstackQueryUtils(fakeClient));
+
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc, orpc } from "@/lib/orpc";
+import {
+  acceptRequestAtom,
+  declineRequestAtom,
+  deleteMessageAtom,
+  hideConversationAtom,
+  markThreadReadAtom,
+  sendMessageAtom,
+} from "@/atoms/messages";
+import type { ThreadItem } from "@/atoms/messages";
+import { setTestSession, signedInSession, signedOutSession } from "@/test/auth-fixture";
+import { queryClient as singletonQueryClient } from "@/lib/query-client";
+import { sessionAtom } from "@/atoms/session";
+import { store as singletonStore } from "@/lib/store";
+import { messagesUnreadQueryOptions } from "@/lib/query-definitions";
+import type { ConversationItem, MessageItem, SentMessage } from "@/lib/orpc";
+
+/**
+ * The private-message cache contracts (issue #408): optimistic send with
+ * rollback and reconciliation, tombstone patching, the read-state patch from
+ * the mutation's authoritative answer, and the requests row leaving
+ * optimistically on accept. Same harness as the notifications atoms' suite.
+ */
+
+const VIEWER = "viewer-1";
+const OTHER = "user-2";
+
+function makeMessage(overrides: Partial<MessageItem> = {}): ThreadItem {
+  return {
+    id: crypto.randomUUID(),
+    senderId: OTHER,
+    body: "a message",
+    createdAt: new Date(),
+    deletedAt: null,
+    attachments: [],
+    ...overrides,
+  };
+}
+
+function seedThread(conversationId: string, items: ThreadItem[]) {
+  singletonQueryClient.setQueryData(orpc.message.thread.key({ input: { conversationId } }), {
+    pages: [{ items, nextCursor: null }],
+    pageParams: [undefined],
+  });
+}
+
+function threadItems(conversationId: string): ThreadItem[] {
+  // SAFETY: the shape seedThread wrote — read back through the same key.
+  const cache = singletonQueryClient.getQueryData(
+    orpc.message.thread.key({ input: { conversationId } }),
+  ) as {
+    pages: Array<{ items: ThreadItem[] }>;
+  };
+  return cache.pages[0].items;
+}
+
+beforeEach(() => {
+  setTestSession(signedInSession({ id: VIEWER }));
+  // `sessionAtom` syncs from the auth nanostore only while subscribed
+  // (see its onMount); without this, the mutation atoms read a stale
+  // viewer id and their optimistic halves never run.
+  unsubscribeSession = singletonStore.sub(sessionAtom, () => {});
+  fakeClient.message.send.mockReset();
+  fakeClient.message.deleteMessage.mockReset();
+  fakeClient.message.markRead.mockReset();
+  fakeClient.message.hide.mockReset();
+  fakeClient.message.accept.mockReset();
+  fakeClient.message.decline.mockReset();
+});
+
+afterEach(() => {
+  unsubscribeSession();
+  singletonQueryClient.clear();
+  vi.restoreAllMocks();
+});
+
+let unsubscribeSession: () => void = () => {};
+
+it("an optimistic send appends, rolls back on refusal, and reconciles — touching only the destination conversation's cache", async () => {
+  // Two cached conversations. The regression this pins: the send mutation
+  // once patched the bare thread prefix, appending the message to EVERY
+  // cached thread — B's history would display A's private text.
+  const mine = makeMessage({ id: "kept" });
+  const theirs = makeMessage({ id: "theirs" });
+  seedThread("c-1", [mine]);
+  seedThread("c-2", [theirs]);
+
+  // Refusal first: the optimistic row must disappear again, and c-2 must
+  // never have received one.
+  fakeClient.message.send.mockRejectedValueOnce(new Error("NOT_FOUND"));
+  const failing = singletonStore.get(sendMessageAtom);
+  await expect(
+    failing.mutateAsync({ recipientId: OTHER, body: "doomed", conversationId: "c-1" }),
+  ).rejects.toThrow("NOT_FOUND");
+  expect(threadItems("c-1").map((item) => item.id)).toEqual(["kept"]);
+  expect(threadItems("c-2").map((item) => item.id)).toEqual(["theirs"]);
+
+  // Then success: the pending row is REPLACED by the server's row, not
+  // duplicated beside it — and only in c-1.
+  const sent: SentMessage = {
+    id: "server-row",
+    conversationId: "c-1",
+    senderId: VIEWER,
+    createdAt: new Date(),
+    body: "hello",
+    attachments: [],
+  };
+  fakeClient.message.send.mockResolvedValueOnce(sent);
+  const sending = singletonStore.get(sendMessageAtom);
+  await sending.mutateAsync({ recipientId: OTHER, body: "hello", conversationId: "c-1" });
+
+  const items = threadItems("c-1");
+  expect(items.map((item) => item.id)).toEqual(["server-row", "kept"]);
+  expect(items[0]).not.toHaveProperty("pending", true);
+  expect(threadItems("c-2").map((item) => item.id)).toEqual(["theirs"]);
+});
+
+it("reconciliation is idempotent when the SSE-driven refetch lands the message before the send response", async () => {
+  seedThread("c-1", [makeMessage({ id: "older" })]);
+  const sent: SentMessage = {
+    id: "server-row",
+    conversationId: "c-1",
+    senderId: VIEWER,
+    createdAt: new Date(),
+    body: "hello",
+    attachments: [],
+  };
+  // The server publishes the push before responding; the hook refetches and
+  // the committed row is in the cache by the time onSuccess runs.
+  let resolveSend: (value: SentMessage) => void = () => {};
+  fakeClient.message.send.mockReturnValueOnce(
+    new Promise<SentMessage>((resolve) => {
+      resolveSend = resolve;
+    }),
+  );
+  const sending = singletonStore.get(sendMessageAtom);
+  const pending = sending.mutateAsync({
+    recipientId: OTHER,
+    body: "hello",
+    conversationId: "c-1",
+  });
+  await vi.waitFor(() => {
+    expect(threadItems("c-1").some((item) => item.pending)).toBe(true);
+  });
+  // The refetched row carries the full thread-item shape (tombstone field
+  // included), exactly as the server would return it.
+  seedThread("c-1", [{ ...sent, deletedAt: null }, ...threadItems("c-1")]);
+  resolveSend(sent);
+  await pending;
+
+  // One server row, one optimistic row retired — not the same id twice.
+  expect(threadItems("c-1").map((item) => item.id)).toEqual(["server-row", "older"]);
+});
+
+it("a media send rides the wire shape and shows its kind optimistically until the server row lands", async () => {
+  seedThread("c-1", [makeMessage({ id: "older" })]);
+  const voiceFile = new File([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3])], "note.webm", {
+    type: "audio/webm",
+  });
+  const image = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "photo.png", {
+    type: "image/png",
+  });
+  const sent: SentMessage = {
+    id: "server-row",
+    conversationId: "c-1",
+    senderId: VIEWER,
+    createdAt: new Date(),
+    body: "",
+    attachments: [
+      {
+        id: "att-1",
+        kind: "image",
+        url: "/media/messages/m1/a1.png",
+        contentType: "image/png",
+        byteSize: 10,
+        position: 0,
+        width: 2,
+        height: 2,
+        durationMs: null,
+        video: null,
+      },
+    ],
+  };
+  fakeClient.message.send.mockResolvedValueOnce(sent);
+
+  const sending = singletonStore.get(sendMessageAtom);
+  const inFlight = sending.mutateAsync({
+    recipientId: OTHER,
+    body: "",
+    conversationId: "c-1",
+    images: [image],
+    voice: voiceFile,
+    voiceDurationMs: 4200,
+  });
+  await vi.waitFor(() => {
+    expect(threadItems("c-1").some((item) => item.pending)).toBe(true);
+  });
+  // The optimistic bubble knows the media group's shape: images (one message
+  // carries ONE group, so the voice note is not a second placeholder).
+  const optimistic = threadItems("c-1").find((item) => item.pending);
+  expect(optimistic?.pendingMedia).toEqual({ kind: "images", count: 1 });
+
+  await inFlight;
+  // The server row replaces the placeholder with real attachments, and the
+  // wire input arrived as the procedure declares it (voice File + its own
+  // duration field, not a wrapper object).
+  expect(fakeClient.message.send).toHaveBeenCalledWith(
+    expect.objectContaining({
+      images: [image],
+      voice: voiceFile,
+      voiceDurationMs: 4200,
+    }),
+    expect.anything(),
+  );
+  const items = threadItems("c-1");
+  expect(items[0].pending).toBeUndefined();
+  expect(items[0].pendingMedia).toBeUndefined();
+  expect(items[0].attachments).toEqual(sent.attachments);
+});
+
+it("deleting the caller's own message tombstones it optimistically and restores it on refusal", async () => {
+  const row = makeMessage({ id: "regrettable", senderId: VIEWER, body: "words" });
+  seedThread("c-1", [row]);
+
+  fakeClient.message.deleteMessage.mockRejectedValueOnce(new Error("refused"));
+  const failing = singletonStore.get(deleteMessageAtom);
+  await expect(failing.mutateAsync({ messageId: "regrettable" })).rejects.toThrow("refused");
+  expect(threadItems("c-1")[0].body).toBe("words");
+  expect(threadItems("c-1")[0].deletedAt).toBeNull();
+
+  fakeClient.message.deleteMessage.mockResolvedValueOnce({
+    id: "regrettable",
+    conversationId: "c-1",
+    deletedAt: new Date(),
+  });
+  const removing = singletonStore.get(deleteMessageAtom);
+  await removing.mutateAsync({ messageId: "regrettable" });
+  expect(threadItems("c-1")[0].body).toBeNull();
+  expect(threadItems("c-1")[0].deletedAt).not.toBeNull();
+});
+
+it("a late failed delete cannot restore the previous viewer's plaintext after logout (issue #408)", async () => {
+  seedThread("c-private", [
+    makeMessage({ id: "private-message", senderId: VIEWER, body: "previous-viewer-plaintext" }),
+  ]);
+  let rejectDeletion: (reason: Error) => void = () => {};
+  fakeClient.message.deleteMessage.mockReturnValueOnce(
+    new Promise<never>((_resolve, reject) => {
+      rejectDeletion = reject;
+    }),
+  );
+  const pending = singletonStore.get(deleteMessageAtom).mutateAsync({
+    messageId: "private-message",
+  });
+  const result = expect(pending).rejects.toThrow("late delete failure");
+  await vi.waitFor(() => {
+    expect(threadItems("c-private")[0].body).toBeNull();
+  });
+
+  setTestSession(signedOutSession());
+  singletonQueryClient.clear();
+  setTestSession(signedInSession({ id: "next-viewer" }));
+  seedThread("c-current", [makeMessage({ body: "current-viewer-message" })]);
+  rejectDeletion(new Error("late delete failure"));
+  await result;
+
+  expect(
+    singletonQueryClient.getQueryData(
+      orpc.message.thread.key({ input: { conversationId: "c-private" } }),
+    ),
+  ).toBeUndefined();
+  expect(threadItems("c-current")[0].body).toBe("current-viewer-message");
+});
+
+it.each(["accept", "decline"] as const)(
+  "a late failed %s cannot overwrite the next viewer's message requests (issue #408)",
+  async (action) => {
+    const key = orpc.message.requests.key();
+    const row = {
+      conversationId: "c-private",
+      lastMessageAt: new Date(),
+      lastMessage: { senderId: OTHER, body: "hi", createdAt: new Date() },
+      user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
+    };
+    singletonQueryClient.setQueryData(key, {
+      pages: [{ items: [row], nextCursor: null }],
+      pageParams: [undefined],
+    });
+    let rejectRequest: (reason: Error) => void = () => {};
+    fakeClient.message[action].mockReturnValueOnce(
+      new Promise<never>((_resolve, reject) => {
+        rejectRequest = reject;
+      }),
+    );
+    const mutation = singletonStore.get(
+      action === "accept" ? acceptRequestAtom : declineRequestAtom,
+    );
+    const pending = mutation.mutateAsync({ conversationId: row.conversationId });
+    const result = expect(pending).rejects.toThrow("late request failure");
+    await vi.waitFor(() => {
+      expect(
+        singletonQueryClient.getQueryData<{ pages: Array<{ items: unknown[] }> }>(key)?.pages[0]
+          .items,
+      ).toEqual([]);
+    });
+
+    setTestSession(signedOutSession());
+    singletonQueryClient.clear();
+    setTestSession(signedInSession({ id: "next-viewer" }));
+    const current = {
+      pages: [{ items: [{ ...row, conversationId: "c-current" }], nextCursor: null }],
+      pageParams: [undefined],
+    };
+    singletonQueryClient.setQueryData(key, current);
+    rejectRequest(new Error("late request failure"));
+    await result;
+
+    expect(singletonQueryClient.getQueryData(key)).toEqual(current);
+  },
+);
+
+it("markRead patches the inbox row's unread count from the mutation's answer", async () => {
+  const row: ConversationItem = {
+    conversationId: "c-1",
+    lastMessageAt: new Date(),
+    lastReadAt: null,
+    unreadCount: 2,
+    lastMessage: { senderId: OTHER, body: "hello?", mediaKind: null, createdAt: new Date() },
+    user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
+  };
+  singletonQueryClient.setQueryData(orpc.message.conversations.key(), {
+    pages: [{ items: [row], nextCursor: null }],
+    pageParams: [undefined],
+  });
+  const cursor = new Date();
+  fakeClient.message.markRead.mockResolvedValue({ lastReadAt: cursor, advanced: true });
+
+  const marking = singletonStore.get(markThreadReadAtom);
+  await marking.mutateAsync({ conversationId: "c-1", lastSeenMessageId: "m-1" });
+
+  // SAFETY: the shape seeded above — read back through the same key.
+  const cache = singletonQueryClient.getQueryData(orpc.message.conversations.key()) as {
+    pages: Array<{ items: ConversationItem[] }>;
+  };
+  expect(cache.pages[0].items[0].unreadCount).toBe(0);
+  expect(cache.pages[0].items[0].lastReadAt).toEqual(cursor);
+});
+
+it.each(["markRead", "hide"] as const)(
+  "a late successful %s leaves the next viewer's inbox unchanged (issue #408)",
+  async (action) => {
+    const key = orpc.message.conversations.key();
+    const row: ConversationItem = {
+      conversationId: "c-shared",
+      lastMessageAt: new Date(),
+      lastReadAt: null,
+      unreadCount: 2,
+      lastMessage: {
+        senderId: OTHER,
+        body: "hello",
+        mediaKind: null,
+        createdAt: new Date(),
+      },
+      user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
+    };
+    const cache = { pages: [{ items: [row], nextCursor: null }], pageParams: [undefined] };
+    singletonQueryClient.setQueryData(key, cache);
+    let markStarted: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    type Response = { conversationId: string } | { lastReadAt: Date | null; advanced: boolean };
+    let resolveResponse: (value: Response) => void = () => {};
+    const response = new Promise<Response>((resolve) => {
+      resolveResponse = resolve;
+    });
+    fakeClient.message[action].mockImplementationOnce(() => {
+      markStarted();
+      return response;
+    });
+    const pending =
+      action === "markRead"
+        ? singletonStore.get(markThreadReadAtom).mutateAsync({
+            conversationId: row.conversationId,
+            lastSeenMessageId: "m-1",
+          })
+        : singletonStore.get(hideConversationAtom).mutateAsync({
+            conversationId: row.conversationId,
+          });
+    await started;
+
+    setTestSession(signedOutSession());
+    singletonQueryClient.clear();
+    setTestSession(signedInSession({ id: "next-viewer" }));
+    singletonQueryClient.setQueryData(key, cache);
+    resolveResponse(
+      action === "markRead"
+        ? { lastReadAt: new Date(), advanced: true }
+        : { conversationId: row.conversationId },
+    );
+    await pending;
+
+    expect(singletonQueryClient.getQueryData(key)).toEqual(cache);
+  },
+);
+
+it("accepting a request removes its row from the requests feed and restores it on refusal", async () => {
+  const row = {
+    conversationId: "c-1",
+    lastMessageAt: new Date(),
+    lastMessage: { senderId: OTHER, body: "hi", createdAt: new Date() },
+    user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
+  };
+  singletonQueryClient.setQueryData(orpc.message.requests.key(), {
+    pages: [{ items: [row], nextCursor: null }],
+    pageParams: [undefined],
+  });
+
+  fakeClient.message.accept.mockRejectedValueOnce(new Error("refused"));
+  const failing = singletonStore.get(acceptRequestAtom);
+  await expect(failing.mutateAsync({ conversationId: "c-1" })).rejects.toThrow("refused");
+  // SAFETY: the shape seeded above — read back through the same key.
+  let cache = singletonQueryClient.getQueryData(orpc.message.requests.key()) as {
+    pages: Array<{ items: unknown[] }>;
+  };
+  expect(cache.pages[0].items).toHaveLength(1);
+
+  fakeClient.message.accept.mockResolvedValueOnce({ conversationId: "c-1" });
+  const invalidateSpy = vi.spyOn(singletonQueryClient, "invalidateQueries");
+  const accepting = singletonStore.get(acceptRequestAtom);
+  await accepting.mutateAsync({ conversationId: "c-1" });
+  // SAFETY: same key, same shape as the read above.
+  cache = singletonQueryClient.getQueryData(orpc.message.requests.key()) as {
+    pages: Array<{ items: unknown[] }>;
+  };
+  expect(cache.pages[0].items).toHaveLength(0);
+
+  // The success path also invalidates the badge — its total is the server's
+  // to recompute, not derivable from one row.
+  expect(invalidateSpy.mock.calls).toContainEqual([
+    { queryKey: messagesUnreadQueryOptions().queryKey },
+  ]);
+});

@@ -66,7 +66,7 @@ to the owning context.
   across origins and RPC and every image break together.
 - **The signed-out allowlist has exactly one definition.**
   `packages/api/src/constants.ts` owns `SIGNED_OUT_PATHS` (exact paths) and
-  the `/post/` prefix rule behind `isSignedOutPath`; the server's page gate
+  the `/post/` and `/games/` prefix rules behind `isSignedOutPath`; the server's page gate
   and the client's `useRequireSignedIn` both read that. Duplicating it lets
   the two gates disagree and bounce a visitor between them forever.
 - **The browser-safe subpaths stay dependency-free.**
@@ -75,8 +75,8 @@ to the owning context.
   `@my-tuums/api/roles` and `@my-tuums/auth/rules` must never import
   `@my-tuums/db`; the web app imports them, and a database import throws at
   module load in a browser.
-  Those six are the _only_ workspace modules in the SPA bundle, and they are
-  the only ones `apps/web` may import from either package.
+  Those subpaths are the only imports `apps/web` may take from the API/auth
+  packages.
 - **Auth-owned user fields are written through the auth client only.**
   `packages/auth`'s database hooks enforce their user-field rules; an oRPC
   procedure writing them bypasses validation. The duplicated handle columns
