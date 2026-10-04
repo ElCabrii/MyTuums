@@ -232,6 +232,10 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
   own scrollbar colors or dimensions.
 - **Feed and list parameterisation lives in atoms.** `PostFeed` takes a
   `feedAtom` prop and never knows its own scope or author.
+- **Game descriptions follow the active UI locale.** `gameQueryOptions` includes
+  Paraglide's locale in the request and cache key, including preloads and favorite
+  updates. The API returns a current French translation or the English source.
+  Locale changes use the existing document reload behavior.
 - **A link preview card belongs to its URL, not to the viewer (issue #260).**
   `PostCard` asks `firstLinkUrl` (exported by `linked-text.tsx`, the same
   scanner that renders the inline links) for the first URL only, and

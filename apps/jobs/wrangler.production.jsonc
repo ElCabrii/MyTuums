@@ -28,6 +28,7 @@
     "binding": "STREAM",
     "remote": false,
   },
+  "ai": { "binding": "AI", "remote": false },
   "send_email": [
     {
       "name": "EMAIL",
@@ -44,6 +45,7 @@
     },
   ],
   "vars": {
+    "GAME_TRANSLATION_ENABLED": "true",
     "WEB_ORIGIN": "https://mytuums.com",
     "EMAIL_FROM": "noreply@mytuums.com",
     "STREAM_NAMESPACE": "mytuums-production",

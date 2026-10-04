@@ -10,6 +10,7 @@ export { cleanupMediaIntents, readMediaReferences } from "./media-intents.js";
 export { cleanupExpiredPostMediaUploads } from "./post-media-upload.js";
 export { reconcileMedia } from "./reconcile-media.js";
 export { createIgdbTransport, syncGamesCatalog } from "./games-sync.js";
+export { translateGameSummaries } from "./game-translations.js";
 export { CatalogAlreadyCurrent, cleanupGameCatalogVersions } from "./game-catalog.js";
 export { cleanupModerationEmails, deliverModerationEmails } from "./moderation-email.js";
 export { createEmailSender } from "@my-tuums/auth/email";

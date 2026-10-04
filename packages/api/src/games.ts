@@ -3,7 +3,13 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { ORPCError } from "@orpc/server";
 import type { Database } from "@my-tuums/db";
 import { game, gameFavorite, follow, user } from "@my-tuums/db/schema";
-import { USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH, normalizeUsername } from "@my-tuums/auth/rules";
+import {
+  USERNAME_MAX_LENGTH,
+  USERNAME_MIN_LENGTH,
+  normalizeUsername,
+  LOCALE_PREFERENCES,
+  type LocalePreference,
+} from "@my-tuums/auth/rules";
 import { z } from "zod";
 import {
   CURSOR_MAX_ENCODED_LENGTH,
@@ -24,6 +30,7 @@ import { containsText } from "./search-text.js";
 import { textIn } from "./sql.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { visibleUser } from "./visibility.js";
+import { localizedGameSummary } from "./game-translations.js";
 
 const favoriteCursor = createCursorCodec(
   z
@@ -95,10 +102,10 @@ async function setGameFavorite(db: Database, slug: string, userId: string, favor
 }
 
 /** The game page's whole read: the catalog row plus the favorite state. */
-const gamePageSelection = (viewerId: string | null) => ({
+const gamePageSelection = (viewerId: string | null, locale: LocalePreference) => ({
   slug: game.slug,
   name: game.name,
-  summary: game.summary,
+  summary: localizedGameSummary(locale),
   coverMediaPath: game.coverMediaPath,
   firstReleaseYear: game.firstReleaseYear,
   firstReleaseDate: game.firstReleaseDate,
@@ -357,10 +364,15 @@ export const gameRouter = {
    */
   bySlug: publicReadProcedure
     .use(publicRateLimit(RATE_LIMITS.read))
-    .input(z.object({ slug: z.string().trim().min(1).max(GAME_SLUG_MAX_LENGTH) }))
+    .input(
+      z.object({
+        slug: z.string().trim().min(1).max(GAME_SLUG_MAX_LENGTH),
+        locale: z.enum(LOCALE_PREFERENCES).default("en"),
+      }),
+    )
     .handler(async ({ input, context }) => {
       const [row] = await context.db
-        .select(gamePageSelection(context.user?.id ?? null))
+        .select(gamePageSelection(context.user?.id ?? null, input.locale))
         .from(game)
         .where(sql`${game.slug} = ${input.slug}`)
         .limit(1);

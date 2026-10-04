@@ -10,6 +10,7 @@ import { createDatabase } from "@my-tuums/db";
 import {
   jobIntent,
   game,
+  gameSummaryTranslation,
   gameCatalogState,
   mediaIntent,
   moderationAction,
@@ -45,6 +46,12 @@ class Video extends RpcTarget {
   get captions() { return new Captions(this.db, this.uid); }
 }
 export default class StreamFixture extends WorkerEntrypoint {
+  async run(model, input) {
+    if (model !== "@cf/meta/m2m100-1.2b" || input.source_lang !== "en" || input.target_lang !== "fr")
+      throw new Error("Unexpected translation request");
+    if (input.text === "A failed description.") throw new Error("Synthetic provider failure");
+    return { translated_text: "Explorez un monde fantastique." };
+  }
   video(uid) { return new Video(this.env.DB, uid); }
   async send(message) {
     await this.env.DB.prepare("insert into test_email (recipient, subject, body) values (?, ?, ?)")
@@ -55,6 +62,18 @@ export default class StreamFixture extends WorkerEntrypoint {
 `;
 const databaseId = `mytuums_workflows_${crypto.randomUUID()}_test`;
 const appealSecret = "synthetic-appeal-secret-at-least-32-characters";
+// Native Ai accepts an AbortSignal locally. The synthetic provider uses RPC,
+// which cannot serialize that signal at this compatibility date. Keep its
+// immediate response behind an in-process adapter, preserving the real Workflow.
+const jobsFixture = `
+import { GameSyncWorkflow as CatalogWorkflow } from "./jobs.js";
+export { default, VideoWorkflow, MaintenanceWorkflow } from "./jobs.js";
+export class GameSyncWorkflow extends CatalogWorkflow {
+  constructor(ctx, env) {
+    super(ctx, { ...env, AI: { run: (model, input) => env.AI.run(model, input) } });
+  }
+}
+`;
 const runtime = new Miniflare({
   workers: [
     {
@@ -66,7 +85,8 @@ const runtime = new Miniflare({
         manifest: {
           mainModule: "index.js",
           modules: {
-            "index.js": {
+            "index.js": { type: "esm", contents: jobsFixture },
+            "jobs.js": {
               type: "esm",
               contents: await readFile(new URL("../dist/index.js", import.meta.url), "utf8"),
             },
@@ -77,6 +97,8 @@ const runtime = new Miniflare({
           MEDIA: { type: "r2", name: "mytuums_jobs_media_test", jurisdiction: "eu" },
           STREAM: { type: "worker", worker: "stream-fixture" },
           EMAIL: { type: "worker", worker: "stream-fixture" },
+          AI: { type: "worker", worker: "stream-fixture" },
+          GAME_TRANSLATION_ENABLED: { type: "json", value: "true" },
           WEB_ORIGIN: { type: "json", value: "https://preview.example.test" },
           EMAIL_FROM: { type: "json", value: "noreply@mytuums.com" },
           APPEAL_TOKEN_SECRET: { type: "json", value: appealSecret },
@@ -146,6 +168,12 @@ const runtime = new Miniflare({
                         id,
                         name: `Game ${id}`,
                         slug: `game-${id}`,
+                        summary:
+                          id === 1
+                            ? "Explore a fantasy world."
+                            : id === 2
+                              ? "A failed description."
+                              : null,
                         genres: [],
                         platforms: [],
                         cover: id === 1 ? { image_id: "cover1" } : null,
@@ -381,6 +409,7 @@ it("runs the daily 5,000-game catalog Workflow with private R2 covers and skips 
     selected: 5000,
     newGames: 5100,
     coversUploaded: 1,
+    translations: { translated: 1, failed: 1, hasMore: false },
   });
   const [cover] = await db
     .select({ path: game.coverMediaPath })
@@ -393,8 +422,19 @@ it("runs the daily 5,000-game catalog Workflow with private R2 covers and skips 
     bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0, 16]),
   });
   const [snapshot] = await db.select().from(gameCatalogState);
+  expect(await db.select().from(gameSummaryTranslation)).toEqual([
+    {
+      gameId: 1,
+      locale: "fr",
+      sourceSummary: "Explore a fantasy world.",
+      summary: "Explorez un monde fantastique.",
+    },
+  ]);
   await instance.restart();
-  expect((await completed(instance)).output).toEqual({ status: "current" });
+  expect((await completed(instance)).output).toEqual({
+    status: "current",
+    translations: { translated: 0, failed: 1, hasMore: false },
+  });
   expect(await db.select().from(gameCatalogState)).toEqual([snapshot]);
 }, 30_000);
 

@@ -128,13 +128,14 @@ function prepareImport(
       throw new Error("Duplicate source table.");
     // Tables that legitimately postdate the production snapshot's format:
     // native runtime tables, and application tables introduced after the
-    // last snapshot was captured (private messages and browser push). Everything
+    // last snapshot was captured (messages, push and game translations). Everything
     // else must be present — a genuinely missing table is drift, not novelty.
     const nativeOnly = new Set([
       "__drizzle_migrations",
       "game_catalog_row",
       "game_catalog_state",
       "game_catalog_version",
+      "game_summary_translation",
       "job_intent",
       "media_intent",
       "moderation_email",

@@ -53,6 +53,13 @@ in [the production execution record](../../docs/cloudflare-production-migration.
   snapshot. The thirty-minute database lease fences stale attempts; each Workflow
   step returns only status and counts. Cold cover-download performance still
   requires remote measurement.
+- After catalog publication (including an already-current replay), game sync
+  translates missing or changed English summaries into French through Workers AI
+  `@cf/meta/m2m100-1.2b`. Steps process 25 descriptions, at most 250 steps per run;
+  each provider call has a 30-second deadline. Item failures remain pending for
+  the next daily/manual sync and never undo catalog publication. Only counts and
+  the game-ID cursor enter Workflow results. `GAME_TRANSLATION_ENABLED` is true
+  in hosted configurations and false locally; tests use a synthetic AI binding.
 - Minute maintenance cleans expired moderation notices and delivers at most 25
   due notices through native Email Service. D1 leases fence acknowledgement and
   preserve recipient ordering. Workflow results contain counts only; private

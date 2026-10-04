@@ -10,6 +10,7 @@ import {
 import type { FeedScope } from "@/lib/feed-scope";
 import { keepPreviousData } from "@tanstack/react-query";
 import { orpc, retryUnlessClientError } from "@/lib/orpc";
+import { getLocale } from "@/paraglide/runtime.js";
 
 interface PostListInput {
   limit: number;
@@ -232,7 +233,7 @@ interface PagedGameListInput {
  */
 export function gameQueryOptions(slug: string) {
   return {
-    ...orpc.game.bySlug.queryOptions({ input: { slug } }),
+    ...orpc.game.bySlug.queryOptions({ input: { slug, locale: getLocale() } }),
     retry: retryUnlessClientError,
   };
 }

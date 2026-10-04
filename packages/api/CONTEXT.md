@@ -187,6 +187,15 @@ imports no filesystem implementation. `src/r2-storage.ts` uses native private
 bucket bindings and follows listing cursors and bounded deletion batches.
 Buffered reads are size-limited; HTTP delivery must stream from the bucket.
 
+`src/game-translations.ts` owns derived French game summaries, stored separately
+from the IGDB projection in `game_summary_translation`. Both reads and writes
+require the translation's exact English source to match the current summary;
+late provider replies cannot replace a newer source's translation. Unchanged
+summaries reuse stored translations, and failures remain eligible for later runs.
+`game.bySlug` accepts an optional `locale` (`en` by default, or `fr`) and keeps its
+existing response shape, falling back to English for missing/stale translations.
+`game-translations.int.test.ts` covers this boundary against real D1.
+
 `src/post-reactions.ts` owns like/repost writes. Its D1 batch rechecks target
 visibility and emits effects only while the reaction is absent, then inserts
 the reaction. Concurrent retries notify once; remove/add produces a new event.

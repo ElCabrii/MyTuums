@@ -18,6 +18,7 @@ import {
   readMediaReferences,
   reconcileMedia,
   syncGamesCatalog,
+  translateGameSummaries,
   createIgdbTransport,
   CatalogAlreadyCurrent,
   cleanupModerationEmails,
@@ -28,11 +29,14 @@ import {
   deliverPushNotifications,
 } from "@my-tuums/api/cloudflare-jobs";
 
-type JobsEnv = Env & { WEB_PUSH_PRIVATE_JWK?: string };
+type JobsEnv = Omit<Env, "GAME_TRANSLATION_ENABLED"> & {
+  GAME_TRANSLATION_ENABLED: string;
+  WEB_PUSH_PRIVATE_JWK?: string;
+};
 
 type JobParams = { entityId: string };
 
-function streamService(env: Env) {
+function streamService(env: JobsEnv) {
   return createStreamService({
     binding: env.STREAM,
     accountId: env.CLOUDFLARE_ACCOUNT_ID,
@@ -109,7 +113,7 @@ export class GameSyncWorkflow extends WorkflowEntrypoint<JobsEnv, JobParams> {
     const scheduledAt = new Date(Number(match[1]));
     // No catalog, credential or cover bytes are persisted in Workflow state.
     // D1 stages the full catalog invisibly and fences every publication.
-    return step.do(
+    const catalog = await step.do(
       "sync-catalog",
       {
         timeout: "30 minutes",
@@ -135,6 +139,50 @@ export class GameSyncWorkflow extends WorkflowEntrypoint<JobsEnv, JobParams> {
         throw new Error("Game catalog sync is temporarily unavailable.");
       },
     );
+    if (this.env.GAME_TRANSLATION_ENABLED !== "true") return catalog;
+    let afterGameId = 0;
+    let translated = 0;
+    let failed = 0;
+    let hasMore = false;
+    // Bound the initial backfill to 6,250 descriptions per run. Unfinished or
+    // failed descriptions remain eligible on the next daily/manual sync.
+    for (let batch = 0; batch < 250; batch += 1) {
+      const result = await step.do(
+        `translate-summaries-${batch}`,
+        {
+          timeout: "15 minutes",
+          retries: { limit: 2, delay: "1 minute", backoff: "exponential" },
+        },
+        async () => {
+          try {
+            return await translateGameSummaries({
+              db: createDatabase(this.env.DB),
+              afterGameId,
+              translate: async (text) => {
+                const response = await this.env.AI.run(
+                  "@cf/meta/m2m100-1.2b",
+                  {
+                    text,
+                    source_lang: "en",
+                    target_lang: "fr",
+                  },
+                  { signal: AbortSignal.timeout(30_000) },
+                );
+                return "translated_text" in response ? (response.translated_text ?? "") : "";
+              },
+            });
+          } catch {
+            throw new Error("Game description translation is temporarily unavailable.");
+          }
+        },
+      );
+      translated += result.translated;
+      failed += result.failed;
+      afterGameId = result.afterGameId;
+      hasMore = result.hasMore;
+      if (!hasMore) break;
+    }
+    return { ...catalog, translations: { translated, failed, hasMore } };
   }
 }
 

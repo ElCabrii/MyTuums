@@ -216,6 +216,26 @@ same fenced publisher (it hydrates from IGDB, so `IGDB_CLIENT_ID` and
 exactly those two keys of the root `.env`, and never loads anything else from
 that file), and the added game then becomes a known id the daily sync keeps
 refreshing.
+
+After publication, daily and manual game syncs translate descriptions into French
+using the jobs Worker's `AI` binding and
+[Workers AI's m2m100 model](https://developers.cloudflare.com/workers-ai/models/m2m100-1.2b/).
+Apply the translation-table migration before deploying the app and jobs Workers.
+Preview and production set `GAME_TRANSLATION_ENABLED=true`; the local build sets
+it to `false` and disables remote AI access. No extra API key is needed. Hosted
+inference consumes the account's Workers AI allowance/billing; synthetic tests
+make no provider calls.
+
+The first run backfills at most 6,250 descriptions in 25-row steps; larger
+backlogs continue on subsequent syncs. Later runs translate only missing or
+changed summaries. Workflow output includes `translations.translated`, `failed`
+and `hasMore`; failed descriptions retry on the next sync (or another
+`pnpm games:sync` in the selected environment). Catalog publication succeeds
+independently of item translation failures. French pages fall back to English
+until a translation matches the current source. Setting the jobs variable to
+`false` stops new inference while retaining stored translations. Translation
+quality still requires a hosted sample review before rollout.
+
 `reconcile:media` always binds the selected database and its
 matching private bucket. Notification pruning is a dry run unless `--apply` is
 present. Promotion remains bootstrap-only after the first admin exists, and

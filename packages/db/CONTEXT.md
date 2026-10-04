@@ -71,6 +71,10 @@ Catalog versions stage invisible rows and atomically update the permanent game
 projection and active pointer. Stable IDs preserve favorites and hashtag keys.
 Immutable cover paths and upload intents protect in-flight PUTs; the cover
 trigger captures superseded storage in the publication commit.
+Migration `0017_fantastic_mentor.sql` adds `game_summary_translation`, keyed by
+game and locale. It retains the exact source summary beside each translation;
+catalog publication never overwrites these derived rows. API reads and conditional
+writes enforce source freshness, and game deletion cascades to translations.
 Workflow scheduling intent also commits with its source transition. Intents
 contain IDs and retry timestamps, never text/captions, and have no owner FK.
 Dispatch acknowledgement proves instance creation, not completion.

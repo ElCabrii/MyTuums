@@ -1525,6 +1525,20 @@ export const game = sqliteTable(
   ],
 );
 
+/** Derived descriptions stay separate from the IGDB-owned catalog projection. */
+export const gameSummaryTranslation = sqliteTable(
+  "game_summary_translation",
+  {
+    gameId: integer("game_id")
+      .notNull()
+      .references(() => game.igdbId, { onDelete: "cascade" }),
+    locale: text("locale").$type<"fr">().notNull(),
+    sourceSummary: text("source_summary").notNull(),
+    summary: text("summary").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.locale] })],
+);
+
 /**
  * A game favorite — a user's public stamp on a game (issue #314). Mirrors
  * `post_bookmark` exactly in shape, and diverges from it exactly once, on
