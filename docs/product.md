@@ -201,12 +201,17 @@ menu; the navigation bar has no standalone theme button.
   instead, the owner is notified, and `followRequest.accept` converts it into
   the edge (rejecting or cancelling deletes it). The profile button reads
   Follow / Requested / Following from `viewerIsFollowing` + `hasRequested`.
-- The home feeds are ranked, not chronological. **For you** (everyone),
+- The home feeds start with ranked recommendations. **For you** (everyone),
   **Following** (you and the people you follow), and **Discover** (other people,
   including those you follow) each serve the same scorer over their own candidate
   set, frozen into a per-viewer snapshot that stays stable for 30 minutes and
-  advances only through an explicit **Refresh**. There is deliberately no
-  chronological toggle on these three surfaces. Interest outranks
+  changes only through an explicit **Refresh** or expiry recovery. After that
+  selection, the feed continues through the remaining eligible posts, newest
+  event first. The recommendation window and 500-post scoring budget never
+  limit how far back a reader can browse. New posts and reposts after the
+  snapshot was created wait for Refresh. Home and Discover load more near the
+  bottom of the viewport, with a Load more button for manual and keyboard use.
+  There is no chronological toggle on these three surfaces. Interest outranks
   outside-network discovery, which outranks raw popularity: favorite games
   first, then likes, then the follow edge, then reposts and reply-thread
   topics, with popularity last and freshness decaying throughout. No machine
@@ -737,7 +742,9 @@ chronological mode. _Avoid:_ global feed, explore.
 
 **Rank snapshot** — one viewer's frozen ranked ordering for one scope and
 filter set: ordered post IDs with repost attribution, never content, stable
-for 30 minutes and resumable by cursor. Follows, blocks, bans, privacy,
+for 30 minutes and resumable by cursor. After its ranked selection, the same
+cursor continues through the remaining eligible posts chronologically,
+excluding the selection's IDs and events newer than the snapshot. Follows, blocks, bans, privacy,
 tombstones and filter membership are re-checked live on every page; an
 unknown, foreign, mismatched or expired snapshot id is an explicit error,
 and expiry on a resumed snapshot self-recovers client-side by dropping the

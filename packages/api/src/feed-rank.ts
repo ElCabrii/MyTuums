@@ -21,7 +21,7 @@
  */
 import { ORPCError } from "@orpc/server";
 import { isAllowedUsernameCharset } from "@my-tuums/auth/rules";
-import { and, desc, eq, gt, gte, isNull, ne, not, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, isNull, lte, ne, not, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import type { Database } from "@my-tuums/db";
 import {
@@ -73,6 +73,7 @@ import {
 import { textIn } from "./sql.js";
 import { containsText } from "./search-text.js";
 import { invisibleAuthor, privatePostHidden } from "./visibility.js";
+import type { RankContinuationPosition } from "./cursor.js";
 
 /** The ranked scopes — the `feed` values a ranked `post.list` call may carry. */
 export type RankScope = "global" | "following" | "discover";
@@ -398,6 +399,49 @@ function aliasPrivateHidden(
   )`;
 }
 
+interface RankSource {
+  viewerId: string;
+  scope: RankScope;
+  q: string | undefined;
+  gameHashtagKey: string | undefined;
+}
+
+/** Shared eligibility for the ranked selection and its chronological continuation. */
+function rankPostFilters(args: RankSource) {
+  return and(
+    isNull(post.parentId),
+    isNull(post.deletedAt),
+    isNull(post.removedAt),
+    args.scope === "discover" ? ne(post.authorId, args.viewerId) : undefined,
+    args.q ? containsText(post.content, args.q) : undefined,
+    args.gameHashtagKey ? containsText(post.content, `#${args.gameHashtagKey}`) : undefined,
+    not(invisibleAuthor(args.viewerId)),
+    not(privatePostHidden(args.viewerId)),
+  );
+}
+
+function rankAuthoredScope(args: RankSource) {
+  return args.scope === "following"
+    ? sql`(${post.authorId} = ${args.viewerId} or exists (
+        select 1 from ${follow}
+        where ${follow.followingId} = ${post.authorId} and ${follow.followerId} = ${args.viewerId}
+      ))`
+    : undefined;
+}
+
+function rankReposterFilters(args: RankSource) {
+  return and(
+    args.scope === "following"
+      ? sql`(${postRepost.userId} = ${args.viewerId} or exists (
+          select 1 from ${follow}
+          where ${follow.followingId} = ${postRepost.userId} and ${follow.followerId} = ${args.viewerId}
+        ))`
+      : undefined,
+    not(aliasHiddenFromViewer(args.viewerId, rankReposter)),
+    not(aliasPrivateHidden(args.viewerId, rankReposter)),
+  );
+}
+
 /**
  * Fetches the authored-post candidates for a scope: top-level, author-alive
  * posts inside the window, through the shared visibility filter. Repost
@@ -413,15 +457,6 @@ async function fetchAuthoredCandidates(
     gameHashtagKey: string | undefined;
   },
 ): Promise<RankCandidate[]> {
-  const scopeFilter =
-    args.scope === "following"
-      ? sql`(${post.authorId} = ${args.viewerId} or exists (
-            select 1 from ${follow}
-            where ${follow.followingId} = ${post.authorId} and ${follow.followerId} = ${args.viewerId}
-          ))`
-      : args.scope === "discover"
-        ? ne(post.authorId, args.viewerId)
-        : undefined;
   return collectRankCandidates(async (after) => {
     const rows = await db
       .select({
@@ -437,20 +472,9 @@ async function fetchAuthoredCandidates(
       .innerJoin(user, eq(user.id, post.authorId))
       .where(
         and(
-          isNull(post.parentId),
-          isNull(post.deletedAt),
-          // Removed posts never rank: scoring invisible text would surface
-          // words no reader may see, and the game filter would oracle them.
-          isNull(post.removedAt),
+          rankPostFilters(args),
+          rankAuthoredScope(args),
           gte(post.createdAt, args.cutoff),
-          args.q ? containsText(post.content, args.q) : undefined,
-          // A selectivity prefilter only: the substring `#key` also
-          // matches `#key2016`, so the collector checks exact tokens before
-          // consuming the budget and scans further when necessary.
-          args.gameHashtagKey ? containsText(post.content, `#${args.gameHashtagKey}`) : undefined,
-          scopeFilter,
-          not(invisibleAuthor(args.viewerId)),
-          not(privatePostHidden(args.viewerId)),
           after
             ? sql`(${post.createdAt}, ${post.id}) < (${sql.param(after.eventAt, post.createdAt)}, ${after.postId})`
             : undefined,
@@ -489,17 +513,6 @@ async function fetchRepostCandidates(
     gameHashtagKey: string | undefined;
   },
 ): Promise<RankCandidate[]> {
-  const reposterRule =
-    args.scope === "following"
-      ? sql`(${postRepost.userId} = ${args.viewerId} or exists (
-              select 1 from ${follow}
-              where ${follow.followingId} = ${postRepost.userId} and ${follow.followerId} = ${args.viewerId}
-            ))`
-      : undefined;
-  // The original joins un-aliased, so the shared visibility predicates read
-  // it directly — the same ban/block/privacy treatment authored candidates get.
-  const originalAuthorRule =
-    args.scope === "discover" ? ne(post.authorId, args.viewerId) : undefined;
   // Pick the latest visible amplification per original before limiting;
   // otherwise one viral post can consume the entire repost budget.
   const latestReposts = db
@@ -521,20 +534,7 @@ async function fetchRepostCandidates(
     .innerJoin(post, eq(post.id, postRepost.postId))
     .innerJoin(user, eq(user.id, post.authorId))
     .where(
-      and(
-        isNull(post.parentId),
-        isNull(post.deletedAt),
-        isNull(post.removedAt),
-        gte(postRepost.createdAt, args.cutoff),
-        args.q ? containsText(post.content, args.q) : undefined,
-        args.gameHashtagKey ? containsText(post.content, `#${args.gameHashtagKey}`) : undefined,
-        reposterRule,
-        originalAuthorRule,
-        not(invisibleAuthor(args.viewerId)),
-        not(privatePostHidden(args.viewerId)),
-        not(aliasHiddenFromViewer(args.viewerId, rankReposter)),
-        not(aliasPrivateHidden(args.viewerId, rankReposter)),
-      ),
+      and(rankPostFilters(args), rankReposterFilters(args), gte(postRepost.createdAt, args.cutoff)),
     )
     .as("latest_rank_reposts");
   return collectRankCandidates(
@@ -554,6 +554,92 @@ async function fetchRepostCandidates(
         .limit(FEED_RANK_POOL_LIMIT),
     args.gameHashtagKey,
   );
+}
+
+/**
+ * Continue past the ranked pool through older eligible events. Select one
+ * latest event per original BEFORE applying the keyset so authored posts and
+ * multiple reposts cannot repeat across pages. The snapshot's IDs are excluded
+ * and its creation time bounds both arms: new posts still require Refresh.
+ * Exact game tokens and live visibility are rechecked by the shared hydrator.
+ */
+export async function rankContinuation(
+  db: RankStore,
+  args: {
+    viewerId: string;
+    snapshot: LoadedRankSnapshot;
+    after: RankContinuationPosition | undefined;
+    limit: number;
+  },
+): Promise<FeedRankSnapshotItem[]> {
+  const { snapshot } = args;
+  if (snapshot.gameSlug && !snapshot.gameHashtagKey) return [];
+  const source: RankSource = {
+    viewerId: args.viewerId,
+    scope: snapshot.scope,
+    q: snapshot.q ?? undefined,
+    gameHashtagKey: snapshot.gameHashtagKey ?? undefined,
+  };
+  const eligible = and(
+    rankPostFilters(source),
+    not(
+      textIn(
+        post.id,
+        snapshot.items.map((item) => item.postId),
+      ),
+    ),
+  );
+  const authored = db
+    .select({
+      postId: post.id,
+      reposterId: sql<string | null>`null`.as("reposter_id"),
+      eventAt: sql<number>`${post.createdAt}`.as("event_at"),
+    })
+    .from(post)
+    .innerJoin(user, eq(user.id, post.authorId))
+    .where(and(eligible, rankAuthoredScope(source), lte(post.createdAt, snapshot.createdAt)));
+  const reposted = db
+    .select({
+      postId: post.id,
+      reposterId: sql<string | null>`${postRepost.userId}`.as("reposter_id"),
+      eventAt: sql<number>`${postRepost.createdAt}`.as("event_at"),
+    })
+    .from(postRepost)
+    .innerJoin(rankReposter, eq(rankReposter.id, postRepost.userId))
+    .innerJoin(post, eq(post.id, postRepost.postId))
+    .innerJoin(user, eq(user.id, post.authorId))
+    .where(
+      and(eligible, rankReposterFilters(source), lte(postRepost.createdAt, snapshot.createdAt)),
+    );
+  const events = authored.unionAll(reposted).as("rank_continuation_events");
+  const latest = db
+    .select({
+      postId: events.postId,
+      reposterId: events.reposterId,
+      eventAt: events.eventAt,
+      position: sql<number>`row_number() over (partition by ${events.postId}
+      order by ${events.eventAt} desc, ${events.reposterId} desc)`.as("position"),
+    })
+    .from(events)
+    .as("rank_continuation_latest");
+  const rows = await db
+    .select({
+      postId: latest.postId,
+      reposterId: latest.reposterId,
+      eventAt: latest.eventAt,
+    })
+    .from(latest)
+    .where(
+      and(
+        eq(latest.position, 1),
+        args.after
+          ? sql`(${latest.eventAt}, ${latest.postId}) < (${new Date(args.after.eventAt).getTime()}, ${args.after.postId})`
+          : undefined,
+      ),
+    )
+    .orderBy(desc(latest.eventAt), desc(latest.postId))
+    .limit(args.limit);
+  return rows.map((row) => ({ ...row, eventAt: new Date(row.eventAt).toISOString() }));
 }
 
 /** The viewer's bounded interest history — every signal the scorer reads. */
@@ -788,6 +874,7 @@ export async function buildRankSnapshot(
   },
 ): Promise<{
   id: string;
+  createdAt: Date;
   expiresAt: Date;
   items: FeedRankSnapshotItem[];
   hasInterests: boolean;
@@ -942,6 +1029,7 @@ async function persistRankSnapshot(
   },
 ): Promise<{
   id: string;
+  createdAt: Date;
   expiresAt: Date;
   items: FeedRankSnapshotItem[];
   hasInterests: boolean;
@@ -963,7 +1051,11 @@ async function persistRankSnapshot(
         hasInterests: args.hasInterests,
         expiresAt: sql`${now} + ${FEED_RANK_SNAPSHOT_TTL_MS}`,
       })
-      .returning({ id: feedRankSnapshot.id, expiresAt: feedRankSnapshot.expiresAt }),
+      .returning({
+        id: feedRankSnapshot.id,
+        createdAt: feedRankSnapshot.createdAt,
+        expiresAt: feedRankSnapshot.expiresAt,
+      }),
     // Subquery selection and deletion share the batch: no stale list or
     // interactive lock is needed between concurrent builds.
     db.delete(feedRankSnapshot).where(sql`${feedRankSnapshot.id} in (
@@ -993,6 +1085,7 @@ async function persistRankSnapshot(
   }
   return {
     id: row.id,
+    createdAt: row.createdAt,
     expiresAt: row.expiresAt,
     items: args.items,
     hasInterests: args.hasInterests,
@@ -1002,6 +1095,7 @@ async function persistRankSnapshot(
 
 export interface LoadedRankSnapshot {
   id: string;
+  createdAt: Date;
   scope: RankScope;
   q: string | null;
   gameSlug: string | null;
@@ -1045,6 +1139,7 @@ export async function loadRankSnapshot(
   if ((args.q ?? null) !== row.q || (args.gameSlug ?? null) !== row.gameSlug) invalidSnapshot();
   return {
     id: row.id,
+    createdAt: row.createdAt,
     scope: row.scope,
     q: row.q,
     gameSlug: row.gameSlug,

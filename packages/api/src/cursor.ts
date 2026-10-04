@@ -144,21 +144,31 @@ export type GameSort = "popularity" | "name" | "year" | "favorites" | "upcoming"
  * `snapshotId` query param; the handler refuses the page when the two
  * disagree, when the snapshot is unknown, foreign, differently-scoped or
  * expired — explicitly, never by silently restarting.
+ * After the frozen selection, `after` carries the chronological event key;
+ * the offset stays at the end of the selection and the snapshot still binds
+ * its viewer, scope, filters and expiry.
  */
 export interface DecodedRankCursor {
   snapshotId: string;
   offset: number;
+  after?: RankContinuationPosition;
+}
+
+export interface RankContinuationPosition {
+  eventAt: string;
+  postId: string;
 }
 
 const rankCursorPayload = z.object({
   snapshotId: z.uuid(),
   offset: z.number().int().min(0).max(100000),
+  after: z.object({ eventAt: z.iso.datetime(), postId: z.uuid() }).optional(),
 });
 
 export function createRankCursorCodec() {
   return {
-    encode(snapshotId: string, offset: number): string {
-      return Buffer.from(JSON.stringify({ snapshotId, offset })).toString("base64url");
+    encode(snapshotId: string, offset: number, after?: RankContinuationPosition): string {
+      return Buffer.from(JSON.stringify({ snapshotId, offset, after })).toString("base64url");
     },
 
     decode(raw: string): DecodedRankCursor {
