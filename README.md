@@ -112,13 +112,17 @@ root `.env` when the environment does not carry them.
 Three levels of validation, widening. Use the narrowest one that can see your
 change while you work, and `pnpm verify` before you push.
 
-| Command            | What it does                                                     |
-| ------------------ | ---------------------------------------------------------------- |
-| `pnpm test:unit`   | Vitest logic/component suites plus native Worker fixtures        |
-| `pnpm verify`      | **PR** — build, lint, typecheck, format, docs, unit, integration |
-| `pnpm verify:full` | **full** — the above plus the Playwright suite                   |
+| Command            | What it does                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------- |
+| `pnpm test:unit`   | Vitest logic/component suites plus native Worker fixtures                                         |
+| `pnpm verify:fast` | **branch CI** — build, static checks, migration metadata, selected unit suites and web Node tests |
+| `pnpm verify`      | **PR** — build, lint, typecheck, format, docs, unit, integration                                  |
+| `pnpm verify:full` | **full** — the above plus the Playwright suite                                                    |
 
-`pnpm verify` is exactly what CI's `Verify` job runs. See
+`pnpm verify` is exactly what CI's `Verify` job runs on PRs targeting `main` and
+pushes to `main`, alongside E2E and Container checks. Release-branch pushes and
+other PRs run `verify:fast` with a five-minute timeout; preview deployment runs
+afterward. See
 [operations](docs/operations.md) for deployment and maintenance commands.
 
 | Command                                                         | What it does                                                   |

@@ -42,17 +42,21 @@ const githubHeaders = new Headers({
 });
 if (process.env.GITHUB_TOKEN)
   githubHeaders.set("Authorization", `Bearer ${process.env.GITHUB_TOKEN}`);
-await waitForPreviewChecks(commit, async () => {
-  const response = await fetch(
-    `https://api.github.com/repos/ElCabrii/MyTuums/commits/${commit}/check-runs?per_page=100`,
-    {
-      headers: githubHeaders,
-      signal: AbortSignal.timeout(15000),
-    },
-  );
-  if (!response.ok) throw new Error("Cannot verify the deployment commit's CI checks.");
-  return response.text();
-});
+await waitForPreviewChecks(
+  commit,
+  async () => {
+    const response = await fetch(
+      `https://api.github.com/repos/ElCabrii/MyTuums/commits/${commit}/check-runs?per_page=100`,
+      {
+        headers: githubHeaders,
+        signal: AbortSignal.timeout(15000),
+      },
+    );
+    if (!response.ok) throw new Error("Cannot verify the deployment commit's CI checks.");
+    return response.text();
+  },
+  target,
+);
 
 function run(args: string[]) {
   assertCheckout();

@@ -226,15 +226,16 @@ from `apps/server/wrangler.preview.jsonc`; the default remains local. Never use 
 snapshot importer against an environment that is accepting writes.
 
 `deploy:preview` gates a clean allowed branch against the exact commit’s latest
-GitHub Actions Verify, E2E tests and Docker image builds results. It
+GitHub Actions results: `Fast checks` for preview; `Verify`, `E2E tests` and
+`Docker image builds` for production. It
 waits up to thirty minutes for newer pending checks on that commit; failed,
-cancelled, missing or foreign checks still refuse deployment immediately. Production
+cancelled, skipped, missing or foreign checks still refuse deployment immediately. Production
 requires `main`; preview requires `release/**`. Retired migration targets and
 all other branches are refused. It then builds and
 deploys migrations, the private link fetcher, jobs and app in order; production
 also deploys branding. `preview-deploy-checks.test.ts` covers refusals
 for invalid target branches and missing, foreign, superseded or failed checks.
-GitHub Actions invokes the command automatically after the same three jobs pass
+GitHub Actions invokes the command automatically after the target's required jobs pass
 on a push; it does not cut over domains, freeze source writes or start schedules.
 
 ## Production migration administration

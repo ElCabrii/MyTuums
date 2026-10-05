@@ -132,17 +132,20 @@ the D1 outbox and Workflows; see [video operations](docs/video-operations.md#mig
 
 ## Verification matrix
 
-Three levels, widening. Use the narrowest one that can see your change while
+Use the narrowest level that can see your change while
 you iterate, and `pnpm verify` before you call the work done.
 
-| Level    | Command            | Covers                                                         |
-| -------- | ------------------ | -------------------------------------------------------------- |
-| **fast** | `pnpm test:unit`   | pure logic, atoms, components, the server's request handling   |
-| **PR**   | `pnpm verify`      | build, lint, typecheck, format, docs, unit **and** integration |
-| **full** | `pnpm verify:full` | the above plus the browser journeys (`pnpm test:e2e`)          |
+| Level         | Command            | Covers                                                                                     |
+| ------------- | ------------------ | ------------------------------------------------------------------------------------------ |
+| **fast**      | `pnpm test:unit`   | pure logic, atoms, components, the server's request handling                               |
+| **branch CI** | `pnpm verify:fast` | build, static checks, migration metadata, API/auth/db/link-fetcher unit and web Node tests |
+| **PR**        | `pnpm verify`      | build, lint, typecheck, format, docs, unit **and** integration                             |
+| **full**      | `pnpm verify:full` | the above plus the browser journeys (`pnpm test:e2e`)                                      |
 
 `pnpm verify` is exactly what CI's `Verify` job runs — one script, so the two
-cannot drift. While iterating, go narrower still:
+cannot drift. Full CI runs on PRs targeting `main` and pushes to `main`.
+Release-branch pushes and other PRs use `verify:fast` with a five-minute job
+timeout; preview deployment follows separately. While iterating, go narrower still:
 
 | Change touches                | Run                                                               |
 | ----------------------------- | ----------------------------------------------------------------- |
