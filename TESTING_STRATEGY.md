@@ -6,16 +6,25 @@ The goal is not coverage. It is **confidence per unit of maintenance cost and
 feedback time**. A suite developers trust and run is worth more than a larger
 one they skip.
 
-## The three levels
+## Verification levels
 
-| Level    | Command            | Needs                             | Use it                                                 |
-| -------- | ------------------ | --------------------------------- | ------------------------------------------------------ |
-| **fast** | `pnpm test:unit`   | local runtime for native fixtures | while editing                                          |
-| **PR**   | `pnpm verify`      | local workerd/D1/R2               | before you call the work done                          |
-| **full** | `pnpm verify:full` | local workerd/D1/R2 + Chromium    | before a release, or when a change crosses the browser |
+| Level         | Command            | Needs                             | Use it                                                    |
+| ------------- | ------------------ | --------------------------------- | --------------------------------------------------------- |
+| **fast**      | `pnpm test:unit`   | local runtime for native fixtures | while editing                                             |
+| **branch CI** | `pnpm verify:fast` | Node and build tools              | release-branch pushes and PRs targeting non-main branches |
+| **PR**        | `pnpm verify`      | local workerd/D1/R2               | before you call the work done                             |
+| **full**      | `pnpm verify:full` | local workerd/D1/R2 + Chromium    | before a release, or when a change crosses the browser    |
 
 `pnpm verify` is byte-for-byte what CI's `Verify` job runs. Narrower still
 while iterating: `pnpm --filter @my-tuums/web exec vitest run src/atoms/like.test.ts`.
+
+Routine branch CI has a five-minute job timeout and runs builds, static checks,
+migration metadata checks and `pnpm test:fast`: API/auth/db/link-fetcher unit
+suites plus web's Node project. DOM, native Worker/Workflow, D1 integration,
+browser and Container checks run on PRs targeting `main` and pushes to `main`.
+This changes when tests run, not which tests exist. Local completion still
+requires `pnpm verify`. Queue time and preview deployment are outside the
+five-minute check budget; measure successful runs before treating it as a latency guarantee.
 
 ## Critical behaviours
 

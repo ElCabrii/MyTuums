@@ -2,22 +2,28 @@
 
 ## Responsibility
 
-CI verifies the Cloudflare application, Workflows and private link-fetcher Container.
-After all three checks pass for a push, `main` deploys production and `release/**`
-deploys preview through the ordered command in
+CI uses a five-minute `Fast checks` job on `release/**` pushes and PRs targeting
+branches other than `main`. PRs targeting `main` and pushes to `main` run full
+verification, E2E and the private link-fetcher Container build. After the target's
+checks pass, `main` deploys production and `release/**` deploys preview through the ordered command in
 `packages/db/scripts/deploy-preview.ts`. Pull requests only run verification.
 
 ## Start here
 
-| File                     | Owns                                             |
-| ------------------------ | ------------------------------------------------ |
-| `workflows/ci.yml`       | verification and branch-gated Cloudflare deploys |
-| `workflows/opencode.yml` | comment-triggered agent, separate from CI        |
-| `../docs/operations.md`  | native build, deployment and test requirements   |
+| File                     | Owns                                                            |
+| ------------------------ | --------------------------------------------------------------- |
+| `workflows/ci.yml`       | full verification for main PRs/pushes and production deployment |
+| `workflows/ci-fast.yml`  | fast branch verification and preview deployment                 |
+| `workflows/opencode.yml` | comment-triggered agent, separate from CI                       |
+| `../docs/operations.md`  | native build, deployment and test requirements                  |
 
 ## Change map
 
 - Add repository-wide checks to `../package.json`'s `verify` script.
+- `verify:fast` keeps build, lint, typecheck, formatting, docs, migration metadata
+  and `test:fast`. The latter runs API/auth/db/link-fetcher unit suites and web's
+  Node project. DOM, native Worker/Workflow and D1 integration suites stay in full
+  verification; no tests are deleted. Keep the shared checks aligned with `verify`.
 - Change browser setup in the `e2e` job and `../e2e/CONTEXT.md` together.
 - Update an action by resolving its full commit and retaining the version comment.
 - Change deployment ordering and branch admission in
@@ -27,14 +33,21 @@ deploys preview through the ordered command in
 ## Invariants
 
 - Every action is pinned to a full commit SHA. Checkout uses
-  `persist-credentials: false`; CI needs only `contents: read`.
+  `persist-credentials: false`; CI needs only `contents: read` and `checks: read`.
 - `Verify` runs exactly `pnpm verify`, including Worker artifact and native
   Workflow checks. Builds precede lint/typecheck because Vite generates sources.
+- Branch filters select the two workflows. Do not replace these filters with
+  skipped jobs sharing the required check names: a newer skipped result on the
+  same commit would supersede a successful deployment check.
 - `E2E tests` builds the SPA before starting its disposable Worker/D1/R2 stack.
   It uses synthetic Access/mail/Stream providers and never loads bucket secrets.
-- All three jobs use the self-hosted runner, Node 24 and the frozen pnpm lockfile.
+- All verification jobs use the self-hosted runner, Node 24 and the frozen pnpm lockfile.
   Browser system libraries must already be installed on that runner.
-- Verification jobs have a 30-minute timeout. Workflow concurrency is scoped by
+- `Fast checks` has a five-minute timeout, including checkout and dependency
+  setup. Full verification jobs have a 30-minute timeout. Runner queue time and
+  deployment are outside the fast-check budget; a timeout fails the check and
+  blocks preview deployment. Confirm successful timings on the actual runner.
+  Workflow concurrency is scoped by
   event type and PR number or branch name. New commits cancel older runs of the
   same PR without cancelling a push run. Active pushes finish because cancellation
   during migrations or a multi-Worker deployment could leave an environment on
@@ -56,7 +69,7 @@ deploys preview through the ordered command in
 
 ## Verification
 
-Run `pnpm verify` and `pnpm test:e2e` locally. Validate workflow YAML and compare
+Run `pnpm verify:fast`, `pnpm verify` and `pnpm test:e2e` locally as appropriate. Validate workflow YAML and compare
 its commands with those scripts. Hosted CI execution remains a separate check
 when this branch is pushed; local success does not prove the runner is available.
 
@@ -67,4 +80,6 @@ The completed migration is recorded in
 push to `main` deploys production; a successful push to `release/**` deploys
 preview. The ordered command remains the only deployment implementation and
 rechecks the exact commit's required GitHub Actions results before applying D1
-migrations and publishing the Worker stack.
+migrations and publishing the Worker stack. Preview requires `Fast checks`;
+production requires `Verify`, `E2E tests` and `Docker image builds`. Skipped,
+cancelled, missing or failed checks never satisfy either deployment gate.
