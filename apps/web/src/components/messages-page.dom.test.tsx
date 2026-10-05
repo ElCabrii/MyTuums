@@ -39,6 +39,7 @@ const OTHER = "user-2";
 
 function conversationRow(overrides: Partial<ConversationItem> = {}): ConversationItem {
   return {
+    group: null,
     conversationId: "c-1",
     lastMessageAt: new Date(),
     lastReadAt: null,

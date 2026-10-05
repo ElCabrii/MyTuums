@@ -148,7 +148,7 @@ The router's top-level groups:
 - `search` — `typeahead`, `users`, `posts`
 - `push` — session-bound browser notification status, subscribe and unsubscribe
 - `notification` — `list`, `unreadCount`, `markRead`
-- `message` — `send`, `conversations`, `requests`, `thread`, `accept`, `decline`, `hide`, `markRead`, `unreadCount`, `deleteMessage`, `conversationWith` (private messages, issue #408)
+- `message` — `send`, `conversations`, `requests`, `thread`, `accept`, `decline`, `hide`, `markRead`, `unreadCount`, `deleteMessage`, `conversationWith`, `createGroup`, `invite`, `join`, `renameGroup`, `leaveGroup`, `removeMember` (direct and group private messages)
 - `moderation` — reports, blocks, the queue, the staff actions, the audit log, appeals
 
 There is deliberately no RPC-level health check; liveness is plain HTTP at

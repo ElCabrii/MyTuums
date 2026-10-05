@@ -271,7 +271,7 @@ menu; the navigation bar has no standalone theme button.
 
 ## Private messages
 
-One conversation per pair of users, ever — whoever writes first, the thread is
+Direct messages have one conversation per pair of users, ever — whoever writes first, the thread is
 the same. Anyone signed in can message anyone except themselves and users
 across a block (either direction); private accounts are messageable like
 anyone else. Signing in on a new browser or device immediately restores access
@@ -322,6 +322,31 @@ Reporting a message works from the thread (tombstones included): the report
 snapshots the message plus up to ten before it, moderators see that snapshot
 with both parties' handles, and every sanction lands on the sender. There is
 deliberately no moderator browse surface for conversations.
+
+### Group conversations
+
+Groups contain up to ten joined members, including the creator. Every member
+can invite people, rename the group, or remove another member; there is no
+owner role. Creation joins the creator and sends explicit invitations to the
+others. Invitations live under Message requests without message previews or
+unread-message badges. A pending invitation grants no text or media access.
+
+Joining exposes the entire retained history. A block in either direction with
+an existing member requires confirmation when joining. Group messages remain
+visible across blocks after joining; direct-message blocks are unchanged.
+Leaving or removal closes thread/media access and removes the conversation
+from the inbox. A fresh invitation and acceptance restore the whole history,
+including messages sent during the absence. Hiding is only inbox curation,
+not leaving. Account deletion removes that account's messages under existing
+cleanup rules, but does not delete the group's other members or history.
+
+Invitations do not reserve seats; joins atomically enforce ten members. A
+repeated pending invitation does not create another request or notification.
+After decline, departure or removal, all inviters share a 24-hour cooldown for
+that group/person. Invitation budgets count recipients across groups: ten per
+hour and thirty per day per inviter. Existing invitations and memberships are
+idempotent and do not consume another recipient slot. A group with no joined
+members cannot accept further joins.
 
 ## Notifications
 
@@ -699,10 +724,10 @@ browser's recorder; the server sniffs the container and stores the recording
 length as the client's declared measurement, bounded by the byte cap.
 _Avoid:_ audio (generic), memo.
 
-**Conversation** — the single thread two users share, created idempotently by
-the first message and shared whichever of them wrote first. Exactly two
-participants in v1; the schema is participants-shaped so groups can arrive
-without a destructive migration. _Avoid:_ thread (that is the reading view),
+**Conversation** — a direct thread or a named group of up to ten joined members.
+A direct thread is created idempotently by the first message and shared
+whichever of its two participants wrote first. A group has equal members and
+requires explicit invitation acceptance. _Avoid:_ thread (the reading view),
 channel.
 
 **Message request** — a first message from someone the recipient does not

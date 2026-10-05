@@ -1127,17 +1127,10 @@ export const notificationLastSeen = sqliteTable("notification_last_seen", {
 });
 
 /**
- * A 1:1 direct-message conversation (issue #408) — exactly one row per pair of
- * users, ever. The pair is stored canonically ordered (`userAId < userBId` by
- * SQLite's BINARY collation; BetterAuth ids are ASCII, so the API's `a < b`
- * in JavaScript agrees with the database's comparison), and the unique pair
- * index is the deterministic pair key: the same two users always share one
- * thread, whichever of them wrote first.
- *
- * The pair columns are the v1 identity — one conversation per two users. Group
- * conversations, if they ever arrive, will need these relaxed (nullable pair,
- * membership moving wholly into `conversation_participant`), which is an
- * additive migration, not a destructive one.
+ * A direct or group conversation. Direct pairs retain their canonical ordered
+ * unique identity and cascade on either account's deletion. Groups have no
+ * pair or owner: membership lives in conversation_participant and another
+ * member's account deletion cannot delete the conversation.
  *
  * `lastMessageAt` is the inbox's ordering cursor, advanced only when a message
  * insert succeeds. It is denormalized on purpose — the inbox walks
@@ -1153,12 +1146,10 @@ export const conversation = sqliteTable(
       .$defaultFn(() => crypto.randomUUID()),
     // Both sides are `text` for the same reason follow's are: `user.id` is
     // BetterAuth's own id format, not a uuid.
-    userAId: text("user_a_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    userBId: text("user_b_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    userAId: text("user_a_id").references(() => user.id, { onDelete: "cascade" }),
+    userBId: text("user_b_id").references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"direct" | "group">().notNull().default("direct"),
+    name: text("name"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
       .notNull(),
@@ -1169,7 +1160,10 @@ export const conversation = sqliteTable(
   (t) => [
     // Canonical ordering IS the pair key's determinism, and it subsumes the
     // not-self rule: `userAId = userBId` cannot satisfy a strict `<`.
-    check("conversation_pair_ordered", sql`${t.userAId} < ${t.userBId}`),
+    check(
+      "conversation_pair_ordered",
+      sql`(${t.kind} = 'direct' and ${t.userAId} is not null and ${t.userBId} is not null and ${t.userAId} < ${t.userBId} and ${t.name} is null) or (${t.kind} = 'group' and ${t.userAId} is null and ${t.userBId} is null and ${t.name} is not null and length(trim(${t.name})) between 1 and 80)`,
+    ),
     uniqueIndex("conversation_pair_unique").on(t.userAId, t.userBId),
     // No (lastMessageAt, id) index here on purpose: the inbox walk scopes
     // through the participant row (conversation_participant_user_idx is its
@@ -1200,9 +1194,11 @@ export const conversation = sqliteTable(
  * unread.
  *
  * The composite primary key is the "one membership per (conversation, user)"
- * rule, and the write path enforces the matching invariant that only the
- * conversation pair's two users ever get rows here (a cross-table rule the
- * schema cannot express; `messages.int.test.ts` pins it).
+ * rule. Direct threads have exactly their pair; groups have at most ten joined
+ * members. `membership` gates group access independently of inbox status.
+ * Invitation timestamps enforce per-inviter recipient budgets and a shared
+ * 24-hour cooldown after decline/departure. Group writes enforce these rules
+ * atomically, including concurrent joins; direct rows keep `joined` throughout.
  */
 export const conversationParticipant = sqliteTable(
   "conversation_participant",
@@ -1214,6 +1210,13 @@ export const conversationParticipant = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     status: text("status").$type<"pending" | "active" | "hidden">().notNull(),
+    membership: text("membership")
+      .$type<"joined" | "invited" | "declined" | "left" | "removed">()
+      .notNull()
+      .default("joined"),
+    invitedBy: text("invited_by"),
+    invitedAt: integer("invited_at", { mode: "timestamp_ms" }),
+    departedAt: integer("departed_at", { mode: "timestamp_ms" }),
     lastReadAt: integer("last_read_at", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
@@ -1227,6 +1230,7 @@ export const conversationParticipant = sqliteTable(
     // covers the third access path — "am I a participant of C", the thread
     // guard.
     index("conversation_participant_user_idx").on(t.userId, t.status, t.conversationId),
+    index("conversation_participant_inviter_idx").on(t.invitedBy, t.invitedAt),
   ],
 );
 

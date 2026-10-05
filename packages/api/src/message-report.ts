@@ -210,5 +210,6 @@ export async function messageCaseSender(db: Database, messageId: string): Promis
 export function messageParticipationExists(userId: string) {
   return sql`exists (select 1 from ${conversationParticipant}
     where ${conversationParticipant.conversationId} = ${message.conversationId}
-      and ${conversationParticipant.userId} = ${userId})`;
+      and ${conversationParticipant.userId} = ${userId}
+      and ${conversationParticipant.membership} = 'joined')`;
 }

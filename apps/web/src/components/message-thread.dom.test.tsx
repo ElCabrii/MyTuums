@@ -56,6 +56,7 @@ function pageMessage(overrides: Partial<MessageItem> = {}): MessageItem {
   return {
     id: crypto.randomUUID(),
     senderId: OTHER,
+    senderName: "Sender",
     body: "text",
     createdAt: new Date(),
     deletedAt: null,

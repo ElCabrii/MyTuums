@@ -1,3 +1,5 @@
+import { clearGroupDraft } from "@/atoms/message-groups";
+import { z } from "zod";
 import { useEffect } from "react";
 import { useAtomValue } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
@@ -40,6 +42,19 @@ export function useMessageEvents(): void {
       void queryClient.invalidateQueries({ queryKey: orpc.message.thread.key() });
     };
 
+    source.addEventListener("revoked", (event: MessageEvent<string>) => {
+      try {
+        const payload = z.object({ conversationId: z.uuid() }).parse(JSON.parse(event.data));
+        clearGroupDraft(payload.conversationId);
+        void queryClient.resetQueries({
+          queryKey: orpc.message.thread.key({ input: { conversationId: payload.conversationId } }),
+        });
+      } catch {
+        // Ignore malformed transport frames; reconnect/focus still reconciles.
+        return;
+      }
+      refreshLists();
+    });
     source.onopen = refreshLists;
     // The hub names every frame (`event: message|read|conversation|unread`);
     // each kind invalidates the same bounded key set, so one handler serves

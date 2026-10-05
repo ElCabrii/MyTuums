@@ -893,3 +893,17 @@ it for reporting; account deletion can retire the underlying storage.
 `readMediaReferences` includes message attachments and reconciliation scans the
 `messages/` prefix. Verify through messages, Stream-job, video-media and
 message-migration integration tests, plus message-media unit tests.
+
+## Group messages
+
+`src/message-groups.ts` owns group creation, invitations, join confirmation,
+rename, leave and removal. Groups have no owner. D1 writes recheck membership,
+account eligibility, the ten-member cap, and invitation budgets. Pending
+invitations reveal member summaries, never history or media. A block in either
+direction requires explicit Join confirmation; joined groups remain readable
+across blocks. `messages.ts` shares media publication and read cursors with
+direct threads. Media and reporting require joined membership; report-gated
+moderator evidence remains available after departure. All history is available
+upon joining again. Per-user SSE fan-out includes a targeted `revoked` event
+when access ends. Verify `message-groups.int.test.ts`, existing messaging/media
+suites, and the populated migration test.
