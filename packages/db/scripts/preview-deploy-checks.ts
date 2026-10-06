@@ -13,7 +13,11 @@ export function requireDeploymentBranch(target: DeploymentTarget, branch: string
 }
 
 /** A newer failed run must supersede an older successful run for the same commit. */
-export function requirePreviewChecks(commit: string, responseBody: string) {
+export function requirePreviewChecks(
+  commit: string,
+  responseBody: string,
+  target: DeploymentTarget,
+) {
   const checks = z
     .object({
       total_count: z.number().int(),
@@ -32,7 +36,9 @@ export function requirePreviewChecks(commit: string, responseBody: string) {
   if (checks.total_count > 100)
     throw new Error("Too many check runs; inspect CI before deploying.");
   let pendingCheck: string | undefined;
-  for (const name of ["Verify", "E2E tests", "Docker image builds"]) {
+  const requiredChecks =
+    target === "preview" ? ["Fast checks"] : ["Verify", "E2E tests", "Docker image builds"];
+  for (const name of requiredChecks) {
     const latest = checks.check_runs
       .filter(
         (check) =>
@@ -54,13 +60,17 @@ export function requirePreviewChecks(commit: string, responseBody: string) {
 }
 
 /** Push and PR checks can overlap; wait for pending checks without accepting stale successes. */
-export async function waitForPreviewChecks(commit: string, readChecks: () => Promise<string>) {
+export async function waitForPreviewChecks(
+  commit: string,
+  readChecks: () => Promise<string>,
+  target: DeploymentTarget,
+) {
   const deadline = Date.now() + 30 * 60_000;
   let waitingLogged = false;
   while (Date.now() < deadline) {
     const responseBody = await readChecks();
     try {
-      requirePreviewChecks(commit, responseBody);
+      requirePreviewChecks(commit, responseBody, target);
       return;
     } catch (error) {
       if (!(error instanceof PendingPreviewChecksError)) throw error;

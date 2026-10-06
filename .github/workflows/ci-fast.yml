@@ -1,0 +1,62 @@
+name: Branch CI
+
+on:
+  push:
+    branches:
+      - release/**
+  pull_request:
+    branches-ignore:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref_name }}
+  # Push runs may be deploying. Finish them before starting a newer release.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  checks: read
+  contents: read
+
+jobs:
+  fast:
+    name: Fast checks
+    runs-on: self-hosted
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+        with:
+          runtime: node@24
+          cache: true
+          require-lockfile: true
+      - run: pnpm verify:fast
+        env:
+          TMPDIR: ${{ runner.temp }}
+
+  deploy-preview:
+    name: Deploy preview
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')
+    needs: [fast]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: cloudflare-preview-deployment
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+        with:
+          runtime: node@24
+          cache: true
+          require-lockfile: true
+      - name: Deploy the verified Cloudflare stack
+        run: pnpm --filter @my-tuums/db deploy:preview --target=preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          VITE_SOCIAL_PROVIDERS: google,discord,twitch

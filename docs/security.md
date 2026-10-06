@@ -661,3 +661,19 @@ Message text is stored as plaintext in D1 and is accessible to the service.
 HTTPS protects transport; participant and block checks protect ordinary reads,
 and moderators can read only the evidence captured by a participant report.
 No browser-held message keys or recovery secrets are required.
+
+## Group messaging membership
+
+Only joined group members may send or read text/media. Invitations expose group
+metadata and current members for informed consent, not message bodies. Leaving
+or removal revokes new reads and sends; rejoining grants the full retained
+history. Previously issued Stream bearer capabilities retain their existing
+one-hour expiry. Membership/cap checks are inside D1 writes. Every joined member
+has equal management rights; no creator privilege survives account deletion.
+
+Blocks still prevent direct messages. Groups intentionally allow shared content
+across blocks after explicit confirmation on Join when a block exists in either
+direction. Confirmation is generic and does not reveal who initiated the block.
+Moderation still receives only submitted evidence; no group browse privilege is
+added. Invitation cooldowns and per-inviter budgets are enforced in D1 across
+all groups and all inviters of a particular group/person pair.

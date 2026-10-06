@@ -1,3 +1,4 @@
+import { CreateGroupButton } from "@/components/message-group-dialog";
 import { messagePreview } from "@/lib/message-preview";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
@@ -61,6 +62,7 @@ export function MessagesPage() {
       >
         <div className="flex items-center justify-between gap-3 px-4 pt-6 pb-3">
           <h1 className="text-lg font-bold tracking-tight">{m.messages_title()}</h1>
+          <CreateGroupButton />
         </div>
         <RequestsEntry />
         <ConversationList />
@@ -165,10 +167,10 @@ function ConversationListSkeleton() {
 function ConversationRow({ item }: { item: ConversationItem }) {
   const locale = getLocale();
   const handle = handleOf(item.user);
-  const displayName = item.user.name || handle || m.user_unknown();
+  const displayName = item.group?.name || item.user?.name || handle || m.user_unknown();
   const when = formatRelativeTime(item.lastMessageAt, locale, m.post_just_now());
   const last = item.lastMessage;
-  const preview = `${last?.body && last.senderId !== item.user.id ? `${m.messages_you()}: ` : ""}${messagePreview(last)}`;
+  const preview = `${last?.body && !item.group && last.senderId !== item.user?.id ? `${m.messages_you()}: ` : ""}${messagePreview(last)}`;
 
   return (
     <Button
@@ -182,7 +184,7 @@ function ConversationRow({ item }: { item: ConversationItem }) {
       }
     >
       <Avatar className="h-10 w-10 shrink-0">
-        {item.user.image && <AvatarImage src={item.user.image} alt="" />}
+        {item.user?.image && <AvatarImage src={item.user?.image} alt="" />}
         <AvatarFallback>{displayName.slice(0, 1).toUpperCase()}</AvatarFallback>
       </Avatar>
       <span className="min-w-0 flex-1">

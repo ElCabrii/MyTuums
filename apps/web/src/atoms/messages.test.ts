@@ -50,6 +50,7 @@ function makeMessage(overrides: Partial<MessageItem> = {}): ThreadItem {
   return {
     id: crypto.randomUUID(),
     senderId: OTHER,
+    senderName: "Sender",
     body: "a message",
     createdAt: new Date(),
     deletedAt: null,
@@ -165,7 +166,7 @@ it("reconciliation is idempotent when the SSE-driven refetch lands the message b
   });
   // The refetched row carries the full thread-item shape (tombstone field
   // included), exactly as the server would return it.
-  seedThread("c-1", [{ ...sent, deletedAt: null }, ...threadItems("c-1")]);
+  seedThread("c-1", [{ ...sent, senderName: "Sender", deletedAt: null }, ...threadItems("c-1")]);
   resolveSend(sent);
   await pending;
 
@@ -342,6 +343,7 @@ it.each(["accept", "decline"] as const)(
 
 it("markRead patches the inbox row's unread count from the mutation's answer", async () => {
   const row: ConversationItem = {
+    group: null,
     conversationId: "c-1",
     lastMessageAt: new Date(),
     lastReadAt: null,
@@ -372,6 +374,7 @@ it.each(["markRead", "hide"] as const)(
   async (action) => {
     const key = orpc.message.conversations.key();
     const row: ConversationItem = {
+      group: null,
       conversationId: "c-shared",
       lastMessageAt: new Date(),
       lastReadAt: null,
@@ -461,4 +464,31 @@ it("accepting a request removes its row from the requests feed and restores it o
   expect(invalidateSpy.mock.calls).toContainEqual([
     { queryKey: messagesUnreadQueryOptions().queryKey },
   ]);
+});
+
+it("a refused send cannot restore a group snapshot after membership was revoked", async () => {
+  const { revokeMessageAccess } = await import("./messages");
+  seedThread("removed", [makeMessage()]);
+  let refuse: (error: Error) => void = () => {};
+  fakeClient.message.send.mockReturnValueOnce(
+    new Promise((_resolve, reject) => {
+      refuse = reject;
+    }),
+  );
+  const pending = singletonStore
+    .get(sendMessageAtom)
+    .mutateAsync({ conversationId: "removed", body: "In flight" });
+  const result = expect(pending).rejects.toThrow("Removed");
+  await vi.waitFor(() => expect(threadItems("removed").some((item) => item.pending)).toBe(true));
+  revokeMessageAccess();
+  await singletonQueryClient.resetQueries({
+    queryKey: orpc.message.thread.key({ input: { conversationId: "removed" } }),
+  });
+  refuse(new Error("Removed"));
+  await result;
+  expect(
+    singletonQueryClient.getQueryData(
+      orpc.message.thread.key({ input: { conversationId: "removed" } }),
+    ),
+  ).toBeUndefined();
 });

@@ -55,8 +55,9 @@ rich-link Container. Cloudflare Email Service sends application mail.
 
 Hosted deployments normally run from GitHub Actions after an eligible push.
 For an operator fallback, use a clean checkout of the target's admitted branch
-whose exact commit has successful `Verify`, `E2E tests`, and
-`Docker image builds` checks, provide the target's public Vite inputs and run:
+whose exact commit has successful `Fast checks` for preview, or `Verify`,
+`E2E tests` and `Docker image builds` for production. Provide the target's
+public Vite inputs and run:
 
 ```bash
 pnpm --filter @my-tuums/db deploy:preview --target=preview
@@ -69,8 +70,8 @@ fetcher, then deploys jobs and the application. Production also deploys
 branding. Both hosted jobs Workers keep their minute Cron schedule so durable
 video, notification and game-sync recovery continues after deployment.
 
-GitHub Actions runs that same command after Verify, E2E tests and Docker image
-builds pass for the exact pushed commit. `main` targets production and
+GitHub Actions runs that same command after the target's required checks
+pass for the exact pushed commit. `main` targets production and
 `release/**` targets preview. Deployments for each environment are serialized,
 and an in-progress push deployment is never cancelled halfway through. The
 repository Actions configuration requires a `CLOUDFLARE_API_TOKEN` secret with
@@ -175,15 +176,24 @@ for hosted diagnosis.
 
 ## CI checks
 
-GitHub Actions runs verification for pull requests and eligible pushes.
-`Verify` runs `pnpm verify`; the other required checks run native browser E2E
-and build the private Container image. All tests use local or disposable D1/R2
+GitHub Actions runs `Fast checks` (`pnpm verify:fast`) on `release/**` pushes
+and PRs targeting branches other than `main`. It keeps build, lint, types,
+formatting, docs, migration metadata and the API/auth/db/link-fetcher unit suites
+plus web's Node tests. Its five-minute timeout includes setup; runner queue time
+and the subsequent preview deployment are outside that budget. A timeout fails
+the check rather than accepting an incomplete suite.
+
+PRs targeting `main` and pushes to `main` run all three release checks:
+`Verify` (`pnpm verify`), native browser E2E, and the private Container image build.
+DOM, native Worker/Workflow and D1 integration tests remain in that full suite.
+All tests use local or disposable D1/R2
 resources and synthetic provider transports. Only the branch-gated deployment
 jobs receive the Cloudflare token after those checks pass; verification jobs do
 not receive deployment credentials.
 
-Before a hosted release, the deploy command confirms all three required checks
-passed on the exact clean commit. If newer checks for that commit are queued or
+Before deployment, the command confirms `Fast checks` for preview or all three
+release checks for production passed on the exact clean commit. If newer
+required checks for that commit are queued or
 running, it waits up to thirty minutes before any build, migration or deployment.
 Failed or cancelled checks still stop deployment. Eligible pushes to `main` deploy production;
 eligible pushes to `release/**` deploy preview. Other branches do not deploy.

@@ -1,3 +1,4 @@
+import { JoinGroupButton } from "@/components/message-group-invitation";
 import { messagePreview } from "@/lib/message-preview";
 import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
@@ -71,14 +72,14 @@ function RequestRow({ item }: { item: MessageRequestItem }) {
   const accept = useAtomValue(acceptRequestAtom);
   const decline = useAtomValue(declineRequestAtom);
   const handle = handleOf(item.user);
-  const displayName = item.user.name || handle || m.user_unknown();
+  const displayName = item.group?.name || item.user?.name || handle || m.user_unknown();
   const when = formatRelativeTime(item.lastMessageAt, locale, m.post_just_now());
   const busy = accept.isPending || decline.isPending;
 
   return (
     <div className="border-border bg-card flex items-start gap-3 rounded-xl border p-4">
       <Avatar className="h-10 w-10 shrink-0">
-        {item.user.image && <AvatarImage src={item.user.image} alt="" />}
+        {item.user?.image && <AvatarImage src={item.user?.image} alt="" />}
         <AvatarFallback>{displayName.slice(0, 1).toUpperCase()}</AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1">
@@ -97,30 +98,40 @@ function RequestRow({ item }: { item: MessageRequestItem }) {
           <span className="text-muted-foreground shrink-0 text-xs">{when}</span>
         </div>
         <p className="text-muted-foreground mt-1 line-clamp-2 text-sm">
-          {messagePreview(item.lastMessage)}
+          {item.group
+            ? m.groups_invitation({
+                names: item.group.members.map((member) => member.name).join(", "),
+              })
+            : messagePreview(item.lastMessage)}
         </p>
         <div className="mt-3 flex gap-2">
-          <Button
-            size="sm"
-            disabled={busy}
-            render={
-              <Link
-                to="/messages/$conversationId"
-                params={{ conversationId: item.conversationId }}
-                className="no-underline"
-              />
-            }
-          >
-            {m.messages_requests_view()}
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={busy}
-            onClick={() => accept.mutate({ conversationId: item.conversationId })}
-          >
-            {m.messages_requests_accept()}
-          </Button>
+          {item.group ? (
+            <JoinGroupButton conversationId={item.conversationId} />
+          ) : (
+            <>
+              <Button
+                size="sm"
+                disabled={busy}
+                render={
+                  <Link
+                    to="/messages/$conversationId"
+                    params={{ conversationId: item.conversationId }}
+                    className="no-underline"
+                  />
+                }
+              >
+                {m.messages_requests_view()}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => accept.mutate({ conversationId: item.conversationId })}
+              >
+                {m.messages_requests_accept()}
+              </Button>
+            </>
+          )}
           <Button
             size="sm"
             variant="ghost"

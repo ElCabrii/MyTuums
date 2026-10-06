@@ -85,7 +85,13 @@ export const conversationWithFamily = atomFamily((userId: string) =>
 /** A thread row as it lives in the cache; `pending` marks an optimistic send. */
 export type ThreadItem = MessageItem & { pending?: boolean; pendingMedia?: PendingMedia };
 type ThreadCache = { pages: Array<{ items: ThreadItem[]; nextCursor: string | null }> };
-type ThreadSnapshot = Array<[readonly unknown[], ThreadCache | undefined]>;
+type ThreadSnapshot = Array<[readonly unknown[], ThreadCache | undefined, number]>;
+let messageAccessGeneration = 0;
+
+/** Revocation also invalidates rollback snapshots captured by in-flight mutations. */
+export function revokeMessageAccess(): void {
+  messageAccessGeneration += 1;
+}
 
 /** Pending callbacks can outlive logout, so ownership belongs to each invocation. */
 interface MessageMutationContext {
@@ -94,11 +100,12 @@ interface MessageMutationContext {
 }
 
 /**
- * One draft per RECIPIENT, in memory: it survives the new-message → thread
+ * Direct drafts key by recipient; group drafts key by `group:<conversationId>`.
+ * One draft per destination, in memory: it survives the new-message → thread
  * transition (both composers key the same recipient id) instead of being
  * wiped by the remount mid-typing, and it survives leaving and returning to
- * a conversation. Keying by recipient — never conversation — is what keeps a
- * draft typed for one person from ever seeding another's composer. Swept at
+ * a conversation. Distinct destination keys keep drafts from crossing into
+ * another conversation. Swept at
  * sign-out with the rest of the viewer's state.
  */
 const messageDrafts = new Map<string, string>();
@@ -137,8 +144,9 @@ export function seedFirstMessageThread(
         conversationId,
         lastReadAt: null,
         hidden: false,
+        group: null,
         user,
-        items: [{ ...message, deletedAt: null }],
+        items: [{ ...message, senderName: "", deletedAt: null }],
         nextCursor: null,
       },
     ],
@@ -150,25 +158,31 @@ type InboxCache = { pages: Array<{ items: ConversationItem[] }> };
 type RequestsCache = { pages: Array<{ items: MessageRequestItem[] }> };
 
 function snapshotOf(queryClient: QueryClient, queryKey: readonly unknown[]): ThreadSnapshot {
-  return queryClient.getQueriesData<ThreadCache>({ queryKey }).map(([key, data]) => [key, data]);
+  return queryClient
+    .getQueriesData<ThreadCache>({ queryKey })
+    .map(([key, data]) => [key, data, messageAccessGeneration]);
 }
 
 function restoreSnapshot(queryClient: QueryClient, snapshot: ThreadSnapshot | undefined): void {
   if (!snapshot) return;
-  for (const [queryKey, data] of snapshot) {
+  for (const [queryKey, data, generation] of snapshot) {
+    if (generation !== messageAccessGeneration) {
+      void queryClient.invalidateQueries({ queryKey });
+      continue;
+    }
     queryClient.setQueryData(queryKey, data);
   }
 }
 
 interface SendVariables {
-  recipientId: string;
+  recipientId?: string;
   body: string;
   /** The open thread the composer sits in, when there is one. */
   conversationId?: string;
   /**
    * The wire shape of `message.send` (one media GROUP per message) plus the
-   * routing-only `conversationId`, which the server's zod strips. Keeping
-   * variables wire-shaped means the mutation options need no override.
+   * conversationId for a group destination. Direct sends retain recipientId;
+   * their optional conversationId scopes the optimistic cache.
    */
   images?: File[];
   voice?: File;
@@ -246,6 +260,7 @@ export const sendMessageAtom = atomWithMutation<
                         {
                           id: `optimistic-${crypto.randomUUID()}`,
                           senderId: viewerId,
+                          senderName: "",
                           body,
                           createdAt: new Date(),
                           deletedAt: null,
@@ -279,7 +294,7 @@ export const sendMessageAtom = atomWithMutation<
                   ? {
                       ...page,
                       items: [
-                        { ...message, deletedAt: null },
+                        { ...message, senderName: "", deletedAt: null },
                         // Drop the optimistic row AND any copy the SSE-driven
                         // refetch may already have landed — one message, once.
                         ...page.items.filter((item) => !item.pending && item.id !== message.id),
