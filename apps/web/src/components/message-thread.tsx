@@ -80,6 +80,7 @@ import {
   VIDEO_MAX_LONG_EDGE,
   VIDEO_MAX_SHORT_EDGE,
 } from "@my-tuums/api/constants";
+import { MessageHoldActions } from "@/components/message-hold-actions";
 import { GroupDetailsButton } from "@/components/message-group-dialog";
 import type { ConversationItem } from "@/lib/orpc";
 import { m } from "@/paraglide/messages.js";
@@ -387,7 +388,21 @@ function MessageScroll({
                 {m.messages_tombstone()}
               </p>
             ) : (
-              <div
+              <MessageHoldActions
+                enabled={!item.pending}
+                actions={(close) =>
+                  mine ? (
+                    <DeleteOwnAction messageId={item.id} expanded onAction={close} />
+                  ) : (
+                    <ReportMessageAction
+                      messageId={item.id}
+                      body={item.body}
+                      attachments={item.attachments}
+                      expanded
+                      onAction={close}
+                    />
+                  )
+                }
                 className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
                   mine
                     ? "bg-primary text-primary-foreground rounded-br-sm"
@@ -419,13 +434,13 @@ function MessageScroll({
                 >
                   {formatRelativeTime(item.createdAt, locale, m.post_just_now())}
                 </span>
-              </div>
+              </MessageHoldActions>
             )}
             {/* A permanently reserved action column: the icon fades in beside
                 the bubble on hover or keyboard focus, and the message never
                 moves — an element appearing in the flex flow would shove the
                 bubble sideways the moment it renders. */}
-            <div className="text-muted-foreground ml-1 flex w-7 shrink-0 items-center justify-center self-center opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 motion-reduce:transition-none">
+            <div className="text-muted-foreground pointer-events-none ml-1 hidden w-7 shrink-0 items-center justify-center self-center opacity-0 transition-opacity group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 motion-reduce:transition-none md:flex">
               {mine && item.deletedAt === null && <DeleteOwnAction messageId={item.id} />}
               {!mine && item.deletedAt === null && (
                 <ReportMessageAction
@@ -442,7 +457,15 @@ function MessageScroll({
   );
 }
 
-function DeleteOwnAction({ messageId }: { messageId: string }) {
+function DeleteOwnAction({
+  messageId,
+  expanded = false,
+  onAction,
+}: {
+  messageId: string;
+  expanded?: boolean;
+  onAction?: () => void;
+}) {
   const remove = useAtomValue(deleteMessageAtom);
   return (
     <button
@@ -450,7 +473,8 @@ function DeleteOwnAction({ messageId }: { messageId: string }) {
       aria-label={m.messages_delete()}
       title={m.messages_delete()}
       disabled={remove.isPending}
-      onClick={() =>
+      onClick={() => {
+        onAction?.();
         remove.mutate(
           { messageId },
           {
@@ -459,11 +483,16 @@ function DeleteOwnAction({ messageId }: { messageId: string }) {
               remove.reset();
             },
           },
-        )
+        );
+      }}
+      className={
+        expanded
+          ? "text-destructive flex min-h-11 items-center justify-center gap-2 rounded-lg border p-3"
+          : "hover:text-destructive rounded p-1 transition-colors"
       }
-      className="hover:text-destructive rounded p-1 transition-colors"
     >
       <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+      {expanded && m.messages_delete()}
     </button>
   );
 }
@@ -472,7 +501,11 @@ function ReportMessageAction({
   messageId,
   body,
   attachments,
+  expanded = false,
+  onAction,
 }: {
+  expanded?: boolean;
+  onAction?: () => void;
   messageId: string;
   body: string | null;
   attachments: ThreadItem["attachments"];
@@ -483,10 +516,18 @@ function ReportMessageAction({
       type="button"
       aria-label={m.moderation_report_title_message()}
       title={m.moderation_report_title_message()}
-      onClick={() => setReport({ targetType: "message", targetId: messageId, body, attachments })}
-      className="hover:text-destructive rounded p-1 transition-colors"
+      onClick={() => {
+        onAction?.();
+        setReport({ targetType: "message", targetId: messageId, body, attachments });
+      }}
+      className={
+        expanded
+          ? "flex min-h-11 items-center justify-center gap-2 rounded-lg border p-3"
+          : "hover:text-destructive rounded p-1 transition-colors"
+      }
     >
       <Flag className="h-3.5 w-3.5" aria-hidden="true" />
+      {expanded && m.moderation_report_title_message()}
     </button>
   );
 }

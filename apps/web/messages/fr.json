@@ -988,6 +988,7 @@
   "messages_back": "Retour aux messages",
   "messages_hide": "Masquer la conversation",
   "messages_hidden": "Masquée de vos messages",
+  "messages_actions": "Actions du message",
   "messages_delete": "Supprimer le message",
   "messages_send": "Envoyer",
   "messages_send_error": "Votre message n'a pas été envoyé. Réessayez.",

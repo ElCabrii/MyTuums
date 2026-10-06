@@ -10,6 +10,7 @@ import { viewerIdAtom } from "@/atoms/session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { UserAvatar } from "@/components/user-avatar";
 import {
   Dialog,
   DialogContent,
@@ -302,7 +303,7 @@ function PeoplePicker({
           .map((person) => (
             <li key={person.id}>
               <Button
-                className="w-full justify-start"
+                className="h-auto w-full justify-start py-2"
                 type="button"
                 variant="ghost"
                 disabled={disabled}
@@ -312,7 +313,12 @@ function PeoplePicker({
                   setSubmitted("");
                 }}
               >
-                {person.name} @{person.username}
+                <span aria-hidden="true" className="shrink-0">
+                  <UserAvatar user={person} alt="" className="size-8" />
+                </span>
+                <span className="min-w-0 truncate">
+                  {person.name} <span className="text-muted-foreground">@{person.username}</span>
+                </span>
               </Button>
             </li>
           ))}
