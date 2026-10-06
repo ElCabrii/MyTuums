@@ -17,6 +17,7 @@
 /** What changed, and where — thin enough to route an invalidation. */
 export type MessagePushEvent =
   | { kind: "message"; conversationId: string }
+  | { kind: "revoked"; conversationId: string }
   | { kind: "read"; conversationId: string }
   | { kind: "conversation"; conversationId: string }
   | { kind: "unread" };

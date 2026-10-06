@@ -80,6 +80,7 @@ import {
   VIDEO_MAX_LONG_EDGE,
   VIDEO_MAX_SHORT_EDGE,
 } from "@my-tuums/api/constants";
+import { GroupDetailsButton } from "@/components/message-group-dialog";
 import type { ConversationItem } from "@/lib/orpc";
 import { m } from "@/paraglide/messages.js";
 
@@ -108,7 +109,7 @@ export function MessageThreadPane({ conversationId }: { conversationId: string }
   const header = thread.data?.pages[0];
   const other = header?.user ?? null;
   const handle = handleOf(other);
-  const displayName = other?.name || handle || m.user_unknown();
+  const displayName = header?.group?.name || other?.name || handle || m.user_unknown();
   const lastReadAt = header?.lastReadAt ?? null;
 
   // A video attachment the workflow is still processing keeps the thread
@@ -177,25 +178,35 @@ export function MessageThreadPane({ conversationId }: { conversationId: string }
     // and composer are plain flex children and MessageScroll owns the only
     // scrolling inside the pane.
     <div className="flex h-full flex-col">
-      <ThreadHeader
-        displayName={displayName}
-        handle={handle}
-        image={other?.image ?? null}
-        userId={other?.id ?? null}
-        onHide={() =>
-          hide.mutate(
-            { conversationId },
-            {
-              onSuccess: () => {
-                toast(m.messages_hidden());
-                void navigate({ to: "/messages", replace: true });
+      {header?.group ? (
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
+          <Button variant="ghost" size="sm" onClick={() => void navigate({ to: "/messages" })}>
+            {m.messages_title()}
+          </Button>
+          <h2 className="min-w-0 truncate font-semibold">{displayName}</h2>
+          <GroupDetailsButton conversationId={conversationId} group={header.group} />
+        </header>
+      ) : (
+        <ThreadHeader
+          displayName={displayName}
+          handle={handle}
+          image={other?.image ?? null}
+          userId={other?.id ?? null}
+          onHide={() =>
+            hide.mutate(
+              { conversationId },
+              {
+                onSuccess: () => {
+                  toast(m.messages_hidden());
+                  void navigate({ to: "/messages", replace: true });
+                },
+                onError: () => toast.error(m.messages_action_error()),
               },
-              onError: () => toast.error(m.messages_action_error()),
-            },
-          )
-        }
-        hidePending={hide.isPending}
-      />
+            )
+          }
+          hidePending={hide.isPending}
+        />
+      )}
       {header?.hidden && (
         <p className="bg-muted/50 text-muted-foreground border-border flex items-center gap-2 border-b px-4 py-2 text-xs">
           <EyeOff className="size-3.5 shrink-0" aria-hidden="true" />
@@ -208,8 +219,9 @@ export function MessageThreadPane({ conversationId }: { conversationId: string }
         isFetching={thread.isFetchingNextPage}
         onLoadMore={() => void thread.fetchNextPage()}
         viewerId={viewerId ?? ""}
+        showSenders={Boolean(header?.group)}
       />
-      <Composer key={other?.id} conversationId={conversationId} recipientId={other?.id ?? ""} />
+      <Composer key={conversationId} conversationId={conversationId} recipientId={other?.id} />
     </div>
   );
 }
@@ -327,7 +339,9 @@ function MessageScroll({
   isFetching,
   onLoadMore,
   viewerId,
+  showSenders = false,
 }: {
+  showSenders?: boolean;
   items: ThreadItem[];
   hasNextPage: boolean;
   isFetching: boolean;
@@ -380,6 +394,11 @@ function MessageScroll({
                     : "bg-muted text-foreground rounded-bl-sm"
                 }`}
               >
+                {showSenders && !mine && (
+                  <p className="mb-1 text-xs font-semibold">
+                    {item.senderName || m.user_unknown()}
+                  </p>
+                )}
                 {item.pending && item.pendingMedia ? (
                   <PendingMediaChip pendingMedia={item.pendingMedia} />
                 ) : (
@@ -500,13 +519,14 @@ function Composer({
   conversationId,
   seedUser,
 }: {
-  recipientId: string;
+  recipientId?: string;
   /** The open thread the composer sits in, when there is one. */
   conversationId?: string;
   /** The recipient's summary — lets a first contact seed the new thread. */
   seedUser?: ConversationItem["user"] | null;
 }) {
-  const [draft, setDraft] = useState(() => messageDraftFor(recipientId));
+  const draftKey = recipientId ?? `group:${conversationId}`;
+  const [draft, setDraft] = useState(() => messageDraftFor(draftKey));
   const send = useAtomValue(sendMessageAtom);
   const navigate = useNavigate();
   const queryClient = useAtomValue(queryClientAtom);
@@ -520,7 +540,7 @@ function Composer({
 
   // Video: the post composer's upload atoms, scoped to THIS recipient so two
   // drafts never share state. The draft survives remounts of the pane.
-  const videoScope = `message:${recipientId}`;
+  const videoScope = `message:${draftKey}`;
   const videoDraft = useAtomValue(videoDraftAtomFamily(videoScope));
   const selectVideo = useSetAtom(selectVideoAtomFamily(videoScope));
   const videoReady = videoDraft?.status === "uploaded" && Boolean(videoDraft.videoId);
@@ -561,7 +581,7 @@ function Composer({
 
   const editDraft = (body: string) => {
     setDraft(body);
-    setMessageDraft(recipientId, body);
+    setMessageDraft(draftKey, body);
   };
 
   const startRecording = async () => {

@@ -145,7 +145,7 @@ describe("conversation lifecycle", () => {
 
     const requests = await call(appRouter.message.requests, {}, { context: contextFor(recipient) });
     expect(requests.items.map((item) => item.conversationId)).toEqual([sent.conversationId]);
-    expect(requests.items[0].user.id).toBe(sender.id);
+    expect(requests.items[0].user?.id).toBe(sender.id);
     expect(requests.items[0].lastMessage?.body).toBe("hello there");
 
     const inbox = await call(

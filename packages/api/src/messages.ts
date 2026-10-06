@@ -1,6 +1,5 @@
 import { ORPCError } from "@orpc/server";
 import { and, desc, eq, isNull, ne, not, sql, type SQLWrapper } from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 import type { Database } from "@my-tuums/db";
 import {
@@ -36,6 +35,12 @@ import {
   type MessageAttachment,
   type MessageVoiceType,
 } from "./message-media.js";
+import {
+  groupMembersSelection,
+  joinedGroup,
+  messageGroupRouter,
+  notifyConversation,
+} from "./message-groups.js";
 import { publishMessageEvent } from "./message-events.js";
 import { keysetPage } from "./pagination.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
@@ -44,9 +49,9 @@ import { requireStorage } from "./profile-media.js";
 import { effectivelyBanned } from "./visibility.js";
 
 /**
- * The private-message surface (issue #408): one conversation per pair of
- * users, plain-text messages, message requests as the anti-spam gate, and a
- * per-participant read cursor.
+ * Direct and group messaging. Direct threads retain their unique pair and
+ * request gate; groups require accepted membership. Message/media publication
+ * and per-participant read cursors share the same atomic write path.
  *
  * Every write here re-checks its eligibility inside the same D1 batch it
  * writes in — a block that landed mid-request reads as a missing recipient
@@ -109,16 +114,6 @@ const requestCursor = createCursorCodec(z.uuid());
 const threadCursor = createCursorCodec(z.uuid());
 
 /**
- * The other side of every conversation query: the OTHER participant's row,
- * aliased away from the viewer's own. The pair invariant guarantees it
- * exists whenever the viewer's does, and through it the other user's public
- * summary joins.
- */
-function otherParticipant() {
-  return alias(conversationParticipant, "other_participant");
-}
-
-/**
  * The last message of each conversation on a page, as a preview: tombstoned
  * bodies redact to null (the placeholder is the client's translation), and
  * the sender id tells the list row whose words the preview carries. A
@@ -130,6 +125,7 @@ function otherParticipant() {
 async function lastMessagePreviews(
   db: Database,
   conversationIds: string[],
+  viewerId: string,
 ): Promise<
   Map<string, { senderId: string; body: string | null; mediaKind: string | null; createdAt: Date }>
 > {
@@ -149,7 +145,12 @@ async function lastMessagePreviews(
         createdAt: message.createdAt,
       })
       .from(message)
-      .where(eq(message.conversationId, conversationId))
+      .where(
+        and(
+          eq(message.conversationId, conversationId),
+          sql`exists (select 1 from conversation_participant where conversation_id = ${conversationId} and user_id = ${viewerId} and membership = 'joined')`,
+        ),
+      )
       .orderBy(desc(message.createdAt), desc(message.id))
       .limit(1);
   // The length guard above is what makes the non-empty batch honest; the
@@ -165,9 +166,11 @@ async function lastMessagePreviews(
 
 /** The `message` procedure group: send, the lists, the thread, the participant actions, and the read cursor. */
 export const messageRouter = {
+  ...messageGroupRouter,
   /**
    * Sends one message — text, an image group, a voice note, or a Stream
-   * video — creating the pair's conversation idempotently on first contact;
+   * video — to a joined group by conversationId, or a direct recipient,
+   * creating the pair's conversation idempotently on first contact;
    * there is deliberately no separate "start conversation" step.
    *
    * One guarded batch: seed the conversation (`onConflictDoNothing` on the
@@ -204,7 +207,8 @@ export const messageRouter = {
     .input(
       z
         .object({
-          recipientId: z.string().min(1),
+          recipientId: z.string().min(1).optional(),
+          conversationId: z.uuid().optional(),
           // Trim first so whitespace never persists as fake content. Empty is
           // legal only beside an attachment (the cross-field rule below) —
           // the database check pins the upper bound alone because it cannot
@@ -220,6 +224,10 @@ export const messageRouter = {
             .max(MESSAGE_VOICE_MAX_DURATION_MS + 2000)
             .optional(),
           videoId: z.uuid().optional(),
+        })
+        .refine(({ recipientId, conversationId }) => Boolean(recipientId || conversationId), {
+          error: "Choose a conversation.",
+          path: ["conversationId"],
         })
         .refine(
           ({ images, voice, videoId }) =>
@@ -241,7 +249,9 @@ export const messageRouter = {
     )
     .handler(async ({ input, context }) => {
       const senderId = context.user.id;
-      if (input.recipientId === senderId) {
+      const groupId = input.recipientId ? undefined : input.conversationId;
+      const recipientId = input.recipientId ?? "";
+      if (recipientId === senderId) {
         throw new ORPCError("BAD_REQUEST", { message: "You can't message yourself." });
       }
 
@@ -249,10 +259,10 @@ export const messageRouter = {
       const [state] = await context.db
         .select({
           recipientExists:
-            sql<boolean>`exists (select 1 from ${user} where ${user.id} = ${input.recipientId})`.mapWith(
+            sql<boolean>`exists (select 1 from ${user} where ${user.id} = ${recipientId})`.mapWith(
               Boolean,
             ),
-          blocked: blockedBetween(senderId, input.recipientId).mapWith(Boolean),
+          blocked: blockedBetween(senderId, recipientId).mapWith(Boolean),
           senderBanned:
             sql<boolean>`exists (select 1 from ${user} where ${user.id} = ${senderId} and ${effectivelyBanned})`.mapWith(
               Boolean,
@@ -264,9 +274,17 @@ export const messageRouter = {
       if (!state || state.senderBanned) {
         throw new ORPCError("FORBIDDEN", { message: "Your account can't send messages." });
       }
-      if (!state.recipientExists || state.blocked) {
+      if (!groupId && (!state.recipientExists || state.blocked)) {
         // Deliberately one message for both: a block must not be revealed.
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
+      }
+
+      if (groupId) {
+        const [membership] = await context.db
+          .select({ id: conversation.id })
+          .from(conversation)
+          .where(and(eq(conversation.id, groupId), joinedGroup(groupId, senderId)));
+        if (!membership) throw new ORPCError("NOT_FOUND");
       }
 
       // Media preparation reads and validates every byte BEFORE anything is
@@ -369,9 +387,14 @@ export const messageRouter = {
         }
       }
 
-      const [userAId, userBId] = pairOf(senderId, input.recipientId);
+      const [userAId, userBId] = pairOf(senderId, recipientId);
       const eligible = and(
-        sendEligibility(senderId, input.recipientId),
+        groupId
+          ? and(
+              joinedGroup(groupId, senderId),
+              sql`exists (select 1 from ${user} where ${user.id} = ${senderId} and ${not(effectivelyBanned)})`,
+            )
+          : sendEligibility(senderId, recipientId),
         uploadId ? mediaUploadIsLive(uploadId) : undefined,
         // Video availability guards every conversation/participant write as
         // well as the message, so a refused send has no conversation effects.
@@ -383,14 +406,14 @@ export const messageRouter = {
       )!;
       const conversationId = crypto.randomUUID();
       const pairRow = sql`from ${conversation} c
-        where c.user_a_id = ${userAId} and c.user_b_id = ${userBId} and ${eligible}`;
+        where ${groupId ? sql`c.id = ${groupId}` : sql`c.user_a_id = ${userAId} and c.user_b_id = ${userBId}`} and ${eligible}`;
 
       // Statement 3's status: `active` when the recipient follows the sender
       // at this moment, else `pending` — the message request. Evaluated once,
       // when the row is created; later messages never re-open a declined
       // conversation, and only the recipient's own reply or accept does.
       const recipientStatus = sql`case when exists (select 1 from ${follow}
-        where ${follow.followerId} = ${input.recipientId} and ${follow.followingId} = ${senderId})
+        where ${follow.followerId} = ${recipientId} and ${follow.followingId} = ${senderId})
         then 'active' else 'pending' end`;
 
       const videoAttachmentId = crypto.randomUUID();
@@ -423,16 +446,16 @@ export const messageRouter = {
         context.db
           .insert(conversation)
           .select(
-            sql`select ${conversationId}, ${userAId}, ${userBId},
+            sql`select ${conversationId}, ${userAId}, ${userBId}, 'direct', null,
               cast(unixepoch('subsec') * 1000 as integer),
               cast(unixepoch('subsec') * 1000 as integer)
-              where ${eligible}`,
+              where ${eligible} and ${!groupId}`,
           )
           .onConflictDoNothing(),
         context.db
           .insert(conversationParticipant)
           .select(
-            sql`select c.id, ${senderId}, 'active', null, cast(unixepoch('subsec') * 1000 as integer) ${pairRow}`,
+            sql`select c.id, ${senderId}, 'active', 'joined', null, null, null, null, cast(unixepoch('subsec') * 1000 as integer) ${pairRow}`,
           )
           .onConflictDoUpdate({
             target: [conversationParticipant.conversationId, conversationParticipant.userId],
@@ -442,7 +465,7 @@ export const messageRouter = {
         context.db
           .insert(conversationParticipant)
           .select(
-            sql`select c.id, ${input.recipientId}, ${recipientStatus}, null, cast(unixepoch('subsec') * 1000 as integer) ${pairRow}`,
+            sql`select c.id, ${recipientId}, ${recipientStatus}, 'joined', null, null, null, null, cast(unixepoch('subsec') * 1000 as integer) ${pairRow} and ${!groupId}`,
           )
           .onConflictDoNothing(),
         context.db
@@ -466,8 +489,10 @@ export const messageRouter = {
           })
           .where(
             and(
-              eq(conversation.userAId, userAId),
-              eq(conversation.userBId, userBId),
+              eq(
+                conversation.id,
+                sql`(select conversation_id from message where id = ${messageId})`,
+              ),
               sql`exists (select 1 from ${message}
                 where ${message.id} = ${messageId} and ${message.conversationId} = ${conversation.id})`,
             ),
@@ -619,16 +644,7 @@ export const messageRouter = {
           : []),
       ];
 
-      await Promise.all([
-        publishMessageEvent(context.messageNotifier, input.recipientId, {
-          kind: "message",
-          conversationId: sent.conversationId,
-        }),
-        publishMessageEvent(context.messageNotifier, senderId, {
-          kind: "message",
-          conversationId: sent.conversationId,
-        }),
-      ]);
+      await notifyConversation(context, sent.conversationId, "message");
       return { ...sent, body: input.body, attachments };
     }),
 
@@ -643,9 +659,11 @@ export const messageRouter = {
     .input(pagedInput)
     .handler(async ({ input, context }) => {
       const me = context.user.id;
-      const other = otherParticipant();
       const selection = {
         conversationId: conversation.id,
+        kind: conversation.kind,
+        name: conversation.name,
+        members: groupMembersSelection(),
         lastMessageAt: conversation.lastMessageAt,
         lastReadAt: conversationParticipant.lastReadAt,
         // Unread is derived, never stored: the other party's live messages
@@ -680,21 +698,15 @@ export const messageRouter = {
             .select(selection)
             .from(conversationParticipant)
             .innerJoin(conversation, eq(conversation.id, conversationParticipant.conversationId))
-            .innerJoin(
-              other,
-              and(
-                eq(other.conversationId, conversationParticipant.conversationId),
-                ne(other.userId, me),
-              ),
-            )
-            .innerJoin(user, eq(user.id, other.userId))
+            .leftJoin(user, eq(user.id, otherOfConversation(me)))
             .where(
               and(
                 eq(conversationParticipant.userId, me),
                 eq(conversationParticipant.status, "active"),
+                eq(conversationParticipant.membership, "joined"),
                 // A block in either direction hides the conversation from
                 // this list — the same read-time rule, never a mutation.
-                sql`not ${blockedBetween(me, other.userId)}`,
+                sql`(${conversation.kind} = 'group' or not ${blockedBetween(me, otherOfConversation(me))})`,
                 cursorFilter,
               ),
             )
@@ -704,10 +716,12 @@ export const messageRouter = {
       const previews = await lastMessagePreviews(
         context.db,
         page.items.map((item) => item.conversationId),
+        me,
       );
       return {
-        items: page.items.map((item) => ({
+        items: page.items.map(({ kind, name, members, ...item }) => ({
           ...item,
+          group: kind === "group" ? { name: name!, members } : null,
           lastMessage: previews.get(item.conversationId) ?? null,
         })),
         nextCursor: page.nextCursor,
@@ -725,9 +739,11 @@ export const messageRouter = {
     .input(pagedInput)
     .handler(async ({ input, context }) => {
       const me = context.user.id;
-      const other = otherParticipant();
       const selection = {
         conversationId: conversation.id,
+        kind: conversation.kind,
+        name: conversation.name,
+        members: groupMembersSelection(),
         lastMessageAt: conversation.lastMessageAt,
         user: {
           id: user.id,
@@ -751,19 +767,13 @@ export const messageRouter = {
             .select(selection)
             .from(conversationParticipant)
             .innerJoin(conversation, eq(conversation.id, conversationParticipant.conversationId))
-            .innerJoin(
-              other,
-              and(
-                eq(other.conversationId, conversationParticipant.conversationId),
-                ne(other.userId, me),
-              ),
-            )
-            .innerJoin(user, eq(user.id, other.userId))
+            .leftJoin(user, eq(user.id, otherOfConversation(me)))
             .where(
               and(
                 eq(conversationParticipant.userId, me),
                 eq(conversationParticipant.status, "pending"),
-                sql`not ${blockedBetween(me, other.userId)}`,
+                sql`${conversationParticipant.membership} in ('joined', 'invited')`,
+                sql`(${conversation.kind} = 'group' or not ${blockedBetween(me, otherOfConversation(me))})`,
                 cursorFilter,
               ),
             )
@@ -772,11 +782,13 @@ export const messageRouter = {
       });
       const previews = await lastMessagePreviews(
         context.db,
-        page.items.map((item) => item.conversationId),
+        page.items.filter((item) => item.kind === "direct").map((item) => item.conversationId),
+        me,
       );
       return {
-        items: page.items.map((item) => ({
+        items: page.items.map(({ kind, name, members, ...item }) => ({
           ...item,
+          group: kind === "group" ? { name: name!, members } : null,
           lastMessage: previews.get(item.conversationId) ?? null,
         })),
         nextCursor: page.nextCursor,
@@ -797,10 +809,12 @@ export const messageRouter = {
     .input(pagedInput.extend({ conversationId: z.uuid() }))
     .handler(async ({ input, context }) => {
       const me = context.user.id;
-      const other = otherParticipant();
       const [header] = await context.db
         .select({
           conversationId: conversation.id,
+          kind: conversation.kind,
+          name: conversation.name,
+          members: groupMembersSelection(),
           lastReadAt: conversationParticipant.lastReadAt,
           status: conversationParticipant.status,
           user: {
@@ -813,30 +827,25 @@ export const messageRouter = {
         })
         .from(conversationParticipant)
         .innerJoin(conversation, eq(conversation.id, conversationParticipant.conversationId))
-        .innerJoin(
-          other,
-          and(
-            eq(other.conversationId, conversationParticipant.conversationId),
-            ne(other.userId, me),
-          ),
-        )
-        .innerJoin(user, eq(user.id, other.userId))
+        .leftJoin(user, eq(user.id, otherOfConversation(me)))
         .where(
           and(
             eq(conversationParticipant.conversationId, input.conversationId),
             eq(conversationParticipant.userId, me),
-            sql`not ${blockedBetween(me, other.userId)}`,
+            eq(conversationParticipant.membership, "joined"),
+            sql`(${conversation.kind} = 'group' or not ${blockedBetween(me, otherOfConversation(me))})`,
           ),
         )
         .limit(1);
       if (!header) {
         throw new ORPCError("NOT_FOUND", { message: "This conversation doesn't exist." });
       }
-      const { status, ...visible } = header;
+      const { status, kind, name, members, ...visible } = header;
 
       const selection = {
         id: message.id,
         senderId: message.senderId,
+        senderName: sql<string>`(select name from user where id = ${message.senderId})`,
         body: sql<string | null>`case when ${message.deletedAt} is null then ${message.body} end`,
         createdAt: message.createdAt,
         deletedAt: message.deletedAt,
@@ -858,12 +867,19 @@ export const messageRouter = {
           context.db
             .select(selection)
             .from(message)
-            .where(and(eq(message.conversationId, input.conversationId), cursorFilter))
+            .where(
+              and(
+                eq(message.conversationId, input.conversationId),
+                cursorFilter,
+                sql`exists (select 1 from conversation_participant where conversation_id = ${input.conversationId} and user_id = ${me} and membership = 'joined')`,
+              ),
+            )
             .orderBy(desc(message.createdAt), desc(message.id))
             .limit(input.limit + 1),
       });
       return {
         ...visible,
+        group: kind === "group" ? { name: name!, members } : null,
         hidden: status === "hidden",
         items: page.items,
         nextCursor: page.nextCursor,
@@ -882,7 +898,7 @@ export const messageRouter = {
     .input(z.object({}))
     .handler(async ({ context }) => {
       const me = context.user.id;
-      const notBlocked = sql`not ${blockedBetween(me, otherOfConversation(me))}`;
+      const notBlocked = sql`(${conversation.kind} = 'group' or not ${blockedBetween(me, otherOfConversation(me))})`;
       const [unreadRows, requestRows] = await context.db.batch([
         context.db
           .select({ count: sql<number>`count(*)` })
@@ -898,6 +914,7 @@ export const messageRouter = {
           .where(
             and(
               eq(conversationParticipant.status, "active"),
+              eq(conversationParticipant.membership, "joined"),
               sql`${message.senderId} <> ${me}`,
               isNull(message.deletedAt),
               sql`${message.createdAt} > coalesce(${conversationParticipant.lastReadAt}, 0)`,
@@ -912,6 +929,7 @@ export const messageRouter = {
             and(
               eq(conversationParticipant.userId, me),
               eq(conversationParticipant.status, "pending"),
+              sql`${conversationParticipant.membership} in ('joined', 'invited')`,
               notBlocked,
             ),
           ),
@@ -941,6 +959,7 @@ export const messageRouter = {
             eq(conversationParticipant.conversationId, input.conversationId),
             eq(conversationParticipant.userId, context.user.id),
             eq(conversationParticipant.status, "pending"),
+            eq(conversationParticipant.membership, "joined"),
           ),
         )
         .returning({ conversationId: conversationParticipant.conversationId });
@@ -967,12 +986,17 @@ export const messageRouter = {
     .handler(async ({ input, context }) => {
       const declined = await context.db
         .update(conversationParticipant)
-        .set({ status: "hidden" })
+        .set({
+          status: "hidden",
+          membership: sql`case when ${conversationParticipant.membership} = 'invited' then 'declined' else ${conversationParticipant.membership} end`,
+          departedAt: sql`case when ${conversationParticipant.membership} = 'invited' then cast(unixepoch('subsec') * 1000 as integer) else ${conversationParticipant.departedAt} end`,
+        })
         .where(
           and(
             eq(conversationParticipant.conversationId, input.conversationId),
             eq(conversationParticipant.userId, context.user.id),
             eq(conversationParticipant.status, "pending"),
+            sql`${conversationParticipant.membership} in ('joined', 'invited')`,
           ),
         )
         .returning({ conversationId: conversationParticipant.conversationId });
@@ -1004,6 +1028,7 @@ export const messageRouter = {
           and(
             eq(conversationParticipant.conversationId, input.conversationId),
             eq(conversationParticipant.userId, context.user.id),
+            eq(conversationParticipant.membership, "joined"),
             ne(conversationParticipant.status, "hidden"),
           ),
         )
@@ -1018,6 +1043,7 @@ export const messageRouter = {
             and(
               eq(conversationParticipant.conversationId, input.conversationId),
               eq(conversationParticipant.userId, context.user.id),
+              eq(conversationParticipant.membership, "joined"),
             ),
           )
           .limit(1);
@@ -1116,6 +1142,7 @@ export const messageRouter = {
       const participation = and(
         eq(conversationParticipant.conversationId, input.conversationId),
         eq(conversationParticipant.userId, me),
+        eq(conversationParticipant.membership, "joined"),
       );
       const advanced = await context.db
         .update(conversationParticipant)
@@ -1197,25 +1224,7 @@ export const messageRouter = {
       if (!row) {
         throw new ORPCError("NOT_FOUND", { message: "This message doesn't exist." });
       }
-      const [pair] = await context.db
-        .select({ userAId: conversation.userAId, userBId: conversation.userBId })
-        .from(conversation)
-        .where(eq(conversation.id, row.conversationId))
-        .limit(1);
-      if (pair) {
-        // Both sides' open threads, previews, and unread counts refresh;
-        // a tombstone can retire an unread message either side still owes.
-        await Promise.all([
-          publishMessageEvent(context.messageNotifier, pair.userAId, {
-            kind: "message",
-            conversationId: row.conversationId,
-          }),
-          publishMessageEvent(context.messageNotifier, pair.userBId, {
-            kind: "message",
-            conversationId: row.conversationId,
-          }),
-        ]);
-      }
+      await notifyConversation(context, row.conversationId, "message");
       return row;
     }),
 };

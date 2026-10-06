@@ -453,3 +453,14 @@ voice-recorder tests, moderation case tests, and local browser inspection.
 Message history loads directly from the authenticated API on every browser;
 no local identity, initialization gate or email recovery is involved. Message
 text and media-only previews share the ordinary inbox/thread projections.
+
+## Group conversations
+
+`src/components/message-group-dialog.tsx` owns group creation and equal-member
+management; `message-group-invitation.tsx` owns server-requested blocked-member
+confirmation. Commands use `src/atoms/message-groups.ts`. Group text/video
+drafts use `group:<conversationId>` destinations; direct drafts retain recipient
+keys through their first-send navigation. Thread responses carry sender names
+and current members. The SSE `revoked` event resets the affected cache and
+draft, invalidates pre-revocation mutation rollback snapshots, and reconciles
+the inbox. Sign-out still sweeps all viewer-owned state.

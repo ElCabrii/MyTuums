@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "@testing-library/react";
 import { renderWithProviders } from "@/test/render";
 import { useMessageEvents } from "@/hooks/use-message-events";
+import { messageDraftFor, setMessageDraft } from "@/atoms/messages";
 import { orpc } from "@/lib/orpc";
 import { messagesUnreadQueryOptions } from "@/lib/query-definitions";
 
@@ -19,23 +20,24 @@ const constructors: FakeEventSourceInstance[] = [];
  * stream lifecycle the assertions drive. */
 class FakeEventSourceInstance {
   onopen: (() => void) | null = null;
-  private readonly listeners = new Map<string, (() => void)[]>();
+  private readonly listeners = new Map<string, ((event: MessageEvent<string>) => void)[]>();
   readonly closed = vi.fn();
 
   constructor(readonly url: string) {
     constructors.push(this);
   }
 
-  addEventListener(kind: string, listener: () => void): void {
+  addEventListener(kind: string, listener: (event: MessageEvent<string>) => void): void {
     this.listeners.set(kind, [...(this.listeners.get(kind) ?? []), listener]);
   }
 
-  emit(kind: string): void {
+  emit(kind: string, data = "{}"): void {
     if (kind === "open") {
       this.onopen?.();
       return;
     }
-    for (const listener of this.listeners.get(kind) ?? []) listener();
+    for (const listener of this.listeners.get(kind) ?? [])
+      listener(new MessageEvent(kind, { data }));
   }
 
   close(): void {
@@ -95,6 +97,20 @@ describe("useMessageEvents", () => {
 
     unmount();
     expect(constructors[0].closed).toHaveBeenCalled();
+  });
+
+  it("revocation erases the affected group cache and draft without clearing another conversation", async () => {
+    const { queryClient } = await renderProbe();
+    const conversationId = "00000000-0000-4000-8000-000000000001";
+    const key = orpc.message.thread.key({ input: { conversationId } });
+    const otherKey = orpc.message.thread.key({ input: { conversationId: "other" } });
+    queryClient.setQueryData(key, { privateText: "Removed group" });
+    queryClient.setQueryData(otherKey, { privateText: "Other group" });
+    setMessageDraft(`group:${conversationId}`, "Unsent private draft");
+    act(() => constructors[0].emit("revoked", JSON.stringify({ conversationId })));
+    expect(queryClient.getQueryData(key)).toBeUndefined();
+    expect(queryClient.getQueryData(otherKey)).toEqual({ privateText: "Other group" });
+    expect(messageDraftFor(`group:${conversationId}`)).toBe("");
   });
 
   it("opens nothing while the protected product is not ready", async () => {

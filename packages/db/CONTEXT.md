@@ -271,3 +271,14 @@ participant state for retained conversations survive. Encryption-only threads
 are removed and mixed threads regain their last plaintext message timestamp.
 The key/recovery tables and envelope column are dropped; message bodies remain
 immutable. Apply these migrations before deploying the matching Worker/SPA.
+
+## Group messaging migration
+
+Migration 0018 relaxes the direct pair columns only for named groups and adds
+membership/invitation state alongside participant inbox status. Existing direct
+participants default to joined without changing request state or read cursors.
+D1 cannot disable foreign keys for a parent rebuild: this migration backs up
+and restores participants, messages and attachments, temporarily suspending
+attachment deletion triggers within the same atomic batch. It must neither
+lose history nor enqueue cleanup for retained media. The populated migration
+test verifies both preservation and subsequent real account-deletion cleanup.

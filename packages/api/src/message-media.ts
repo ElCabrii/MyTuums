@@ -238,6 +238,7 @@ export async function canViewMessageMedia(
             select 1 from ${conversationParticipant}
             where ${conversationParticipant.conversationId} = ${message.conversationId}
               and ${conversationParticipant.userId} = ${viewerId}
+              and ${conversationParticipant.membership} = 'joined'
           ))
 
         )`,

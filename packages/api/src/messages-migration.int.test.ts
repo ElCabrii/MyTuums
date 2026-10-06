@@ -301,3 +301,56 @@ it("removes unreleased encrypted messages and keys while preserving plaintext hi
     await rm(encryptedFolder, { recursive: true, force: true });
   }
 });
+
+it("group migration preserves messages, participant state and media without scheduling cleanup", async () => {
+  const oldFolder = await migrationsBefore(18);
+  const database = await createTestDatabase({ migrationsFolder: oldFolder });
+  const client = database.db.$client;
+  try {
+    await client.batch([
+      client.prepare(
+        "insert into user (id, name, email) values ('a', 'A', 'a@example.invalid'), ('b', 'B', 'b@example.invalid')",
+      ),
+      client.prepare(
+        "insert into conversation (id, user_a_id, user_b_id, last_message_at) values ('c', 'a', 'b', 200)",
+      ),
+      client.prepare(
+        "insert into conversation_participant (conversation_id, user_id, status, last_read_at) values ('c', 'a', 'hidden', 123), ('c', 'b', 'pending', null)",
+      ),
+      client.prepare(
+        "insert into message (id, conversation_id, sender_id, body, created_at) values ('m', 'c', 'a', 'Preserved', 200)",
+      ),
+      client.prepare(
+        "insert into message_attachment (id, message_id, kind, media_path, content_type, byte_size) values ('img', 'm', 'image', '/media/messages/m/img.png', 'image/png', 100)",
+      ),
+    ]);
+    await migrate(drizzle(client), { migrationsFolder: committedMigrationsFolder });
+    expect(
+      await client.prepare("select kind, last_message_at from conversation where id = 'c'").first(),
+    ).toEqual({ kind: "direct", last_message_at: 200 });
+    expect(
+      await client
+        .prepare(
+          "select status, membership, last_read_at from conversation_participant where user_id = 'a'",
+        )
+        .first(),
+    ).toEqual({ status: "hidden", membership: "joined", last_read_at: 123 });
+    expect(await client.prepare("select body from message where id = 'm'").first()).toEqual({
+      body: "Preserved",
+    });
+    expect(await client.prepare("select count(*) as n from message_attachment").first()).toEqual({
+      n: 1,
+    });
+    expect(await client.prepare("select count(*) as n from media_intent").first()).toEqual({
+      n: 0,
+    });
+    expect((await client.prepare("PRAGMA foreign_key_check").all()).results).toEqual([]);
+    await client.prepare("delete from user where id = 'a'").run();
+    expect(
+      await client.prepare("select count(*) as n from media_intent where kind = 'cleanup'").first(),
+    ).toEqual({ n: 1 });
+  } finally {
+    await database.dispose();
+    await rm(oldFolder, { recursive: true, force: true });
+  }
+});
